@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { Suspense, useState, useEffect } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import { createClientSupabaseClient } from '@/utils/supabase/client'
@@ -42,7 +42,7 @@ interface Subscription {
   current_period_end: string
 }
 
-export default function SettingsPage() {
+function SettingsLogic() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const tabParam = searchParams.get('tab')
@@ -51,6 +51,7 @@ export default function SettingsPage() {
     : tabParam === 'tags'
       ? 'tags'
       : 'profile'
+
   const [supabase] = useState(() => createClientSupabaseClient())
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null)
   const [zendeskConnection, setZendeskConnection] = useState<ZendeskConnection | null>(null)
@@ -67,7 +68,6 @@ export default function SettingsPage() {
   useEffect(() => {
     const fetchData = async () => {
       try {
-        // Fetch user profile
         const { data: { user } } = await supabase.auth.getUser()
         if (user) {
           setUserProfile({
@@ -76,14 +76,12 @@ export default function SettingsPage() {
           })
         }
 
-        // Fetch Zendesk connection
         const { data: zendeskData } = await supabase
           .from('zendesk_connections')
           .select('*')
           .single()
         setZendeskConnection(zendeskData)
 
-        // Fetch import settings
         const { data: importData } = await supabase
           .from('import_settings')
           .select('*')
@@ -92,7 +90,6 @@ export default function SettingsPage() {
           setImportSettings(importData)
         }
 
-        // Fetch AI settings
         const { data: aiData } = await supabase
           .from('ai_settings')
           .select('*')
@@ -101,7 +98,6 @@ export default function SettingsPage() {
           setAISettings(aiData)
         }
 
-        // Fetch subscription
         const { data: subscriptionData } = await supabase
           .from('stripe_subscriptions')
           .select('*')
@@ -163,7 +159,6 @@ export default function SettingsPage() {
   }
 
   const handleTabChange = (value: string) => {
-    // Update the URL without a full page reload
     const url = new URL(window.location.href);
     url.searchParams.set('tab', value);
     window.history.pushState({}, '', url);
@@ -178,6 +173,27 @@ export default function SettingsPage() {
   }
 
   return (
+    <Tabs defaultValue={defaultTab} className="space-y-6" onValueChange={handleTabChange}>
+      <TabsList className="bg-background border">
+        <TabsTrigger value="profile">Profile</TabsTrigger>
+        <TabsTrigger value="integrations">Integrations</TabsTrigger>
+        <TabsTrigger value="tags">Tags</TabsTrigger>
+      </TabsList>
+      <TabsContent value="profile">
+        <ProfileTab />
+      </TabsContent>
+      <TabsContent value="integrations">
+        <IntegrationsTab />
+      </TabsContent>
+      <TabsContent value="tags">
+        <TagsTab />
+      </TabsContent>
+    </Tabs>
+  )
+}
+
+export default function SettingsPage() {
+  return (
     <div className="flex flex-col space-y-6 p-6">
       <div>
         <h1 className="text-2xl font-semibold">Settings</h1>
@@ -186,22 +202,9 @@ export default function SettingsPage() {
         </p>
       </div>
 
-      <Tabs defaultValue={defaultTab} className="space-y-6" onValueChange={handleTabChange}>
-        <TabsList className="bg-background border">
-          <TabsTrigger value="profile">Profile</TabsTrigger>
-          <TabsTrigger value="integrations">Integrations</TabsTrigger>
-          <TabsTrigger value="tags">Tags</TabsTrigger>
-        </TabsList>
-        <TabsContent value="profile">
-          <ProfileTab />
-        </TabsContent>
-        <TabsContent value="integrations">
-          <IntegrationsTab />
-        </TabsContent>
-        <TabsContent value="tags">
-          <TagsTab />
-        </TabsContent>
-      </Tabs>
+      <Suspense fallback={<p>Loading settings...</p>}>
+        <SettingsLogic />
+      </Suspense>
     </div>
   )
-} 
+}
