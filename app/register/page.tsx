@@ -1,13 +1,16 @@
 "use client"
 
 import { useState } from "react"
+import { useRouter } from "next/navigation"
 import Link from "next/link"
 import { ArrowLeft, ArrowRight, Check } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { Alert, AlertDescription } from "@/components/ui/alert"
 import { cn } from "@/lib/utils"
+import { createClientSupabaseClient } from "@/utils/supabase/client"
 
 const useCases = [
   { id: "customer-feedback", label: "Customer Feedback Analysis" },
@@ -20,10 +23,16 @@ const useCases = [
 const roles = ["Product Manager", "Customer Support Lead", "CTO", "Founder", "UX Researcher", "Other"]
 
 export default function RegisterPage() {
+  const router = useRouter()
   const [step, setStep] = useState(1)
+  const [error, setError] = useState<string | null>(null)
+  const [success, setSuccess] = useState<string | null>(null)
+  const [isLoading, setIsLoading] = useState(false)
+  const [supabase] = useState(() => createClientSupabaseClient())
   const [formData, setFormData] = useState({
     name: "",
     email: "",
+    password: "",
     company: "",
     role: "",
     useCase: "",
@@ -44,13 +53,87 @@ export default function RegisterPage() {
     })
   }
 
-  const nextStep = () => {
+  const handleSignUp = async () => {
+    setIsLoading(true)
+    setError(null)
+    setSuccess(null)
+
+    try {
+      console.log("Starting signup process...")
+      
+      // Sign up with Supabase - include redirect URL
+      const { data: authData, error: authError } = await supabase.auth.signUp({
+        email: formData.email,
+        password: formData.password,
+        options: {
+          emailRedirectTo: `${window.location.origin}/auth/callback`,
+          data: {
+            full_name: formData.name,
+            company: formData.company,
+            role: formData.role
+          }
+        }
+      })
+
+      if (authError) {
+        console.error("Auth error during signup:", authError)
+        throw authError
+      }
+
+      console.log("Auth signup response:", authData)
+
+      // Create the user profile in the profiles table
+      if (authData.user) {
+        try {
+          // Insert into profiles table
+          const { error: profileError } = await supabase
+            .from('profiles')
+            .insert({
+              id: authData.user.id,
+              full_name: formData.name,
+              company: formData.company,
+              role: formData.role,
+              use_cases: selectedUseCases
+            })
+
+          if (profileError) {
+            console.error("Profile creation error:", profileError)
+            // Don't throw here - we want to still show the email verification message
+          }
+        } catch (profileError) {
+          console.error("Error creating profile:", profileError)
+          // Continue to show success message even if profile creation fails
+        }
+
+        // Email confirmation is almost always required with Supabase
+        setSuccess(`A verification link has been sent to ${formData.email}. Please check your email and click the link to verify your account.`)
+        return
+      }
+
+      // If we somehow get here without a user, show an error
+      if (!authData.user) {
+        throw new Error("Failed to create account - no user returned")
+      }
+      
+    } catch (error: any) {
+      console.error("Signup error:", error)
+      
+      // Handle specific error cases
+      if (error.message.includes("already registered")) {
+        setError("This email is already registered. Please sign in or use a different email.")
+      } else {
+        setError(error.message || "Failed to create account")
+      }
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  const nextStep = async () => {
     if (step < 3) {
       setStep(step + 1)
     } else {
-      // Submit form
-      console.log("Form submitted:", formData, selectedUseCases)
-      window.location.href = "/onboarding/connect-zendesk"
+      await handleSignUp()
     }
   }
 
@@ -62,7 +145,7 @@ export default function RegisterPage() {
 
   const isNextDisabled = () => {
     if (step === 1) {
-      return !formData.name || !formData.email || !formData.email.includes("@")
+      return !formData.name || !formData.email || !formData.password || !formData.email.includes("@") || formData.password.length < 6
     }
     if (step === 2) {
       return !formData.company || !formData.role
@@ -79,10 +162,8 @@ export default function RegisterPage() {
       <header className="border-b bg-white">
         <div className="container flex h-16 items-center">
           <Link href="/" className="flex items-center gap-2">
-            <div className="rounded-md bg-[#d8f950] p-1">
-              <span className="font-bold text-black">K</span>
-            </div>
-            <span className="font-bold text-xl">KISA</span>
+            <img src="/inzikt_logo.svg" alt="Inzikt Logo" className="h-10 w-10" style={{ filter: 'brightness(0) saturate(100%) invert(41%) sepia(94%) saturate(749%) hue-rotate(202deg) brightness(99%) contrast(101%)' }} />
+            <span className="font-bold text-xl text-[#6366F1]">Inzikt</span>
           </Link>
         </div>
       </header>
@@ -119,12 +200,24 @@ export default function RegisterPage() {
               <div className="mt-2 text-sm text-gray-500 text-center">Step {step} of 3</div>
             </div>
 
+            {error && (
+              <Alert variant="destructive" className="mb-4">
+                <AlertDescription>{error}</AlertDescription>
+              </Alert>
+            )}
+            
+            {success && (
+              <Alert className="mb-4 bg-green-50 border-green-200 text-green-800">
+                <AlertDescription>{success}</AlertDescription>
+              </Alert>
+            )}
+
             {/* Step 1: Name + Email */}
             {step === 1 && (
               <div className="space-y-6">
                 <div className="text-center mb-6">
                   <h1 className="text-2xl font-bold mb-2">Create your account</h1>
-                  <p className="text-gray-600">Let's get started with your Kisa journey</p>
+                  <p className="text-gray-600">Let's get started with your Inzikt journey</p>
                 </div>
 
                 <div className="space-y-4">
@@ -147,6 +240,18 @@ export default function RegisterPage() {
                       value={formData.email}
                       onChange={(e) => updateFormData("email", e.target.value)}
                     />
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="password">Password</Label>
+                    <Input
+                      id="password"
+                      type="password"
+                      placeholder="••••••••"
+                      value={formData.password}
+                      onChange={(e) => updateFormData("password", e.target.value)}
+                    />
+                    <p className="text-sm text-gray-500">Must be at least 6 characters</p>
                   </div>
                 </div>
               </div>
@@ -194,7 +299,7 @@ export default function RegisterPage() {
             {step === 3 && (
               <div className="space-y-6">
                 <div className="text-center mb-6">
-                  <h1 className="text-2xl font-bold mb-2">How will you use Kisa?</h1>
+                  <h1 className="text-2xl font-bold mb-2">How will you use Inzikt?</h1>
                   <p className="text-gray-600">Select all that apply to customize your experience</p>
                 </div>
 
@@ -205,48 +310,68 @@ export default function RegisterPage() {
                       type="button"
                       onClick={() => toggleUseCase(useCase.id)}
                       className={cn(
-                        "flex items-center justify-between w-full p-3 rounded-lg border text-left transition-all",
+                        "w-full p-4 text-left border rounded-lg transition-colors",
                         selectedUseCases.includes(useCase.id)
-                          ? "border-[#d8f950] bg-[#d8f950]/10"
-                          : "border-gray-200 hover:border-gray-300",
+                          ? "border-black bg-black/5"
+                          : "border-gray-200 hover:border-gray-300"
                       )}
                     >
-                      <span>{useCase.label}</span>
-                      {selectedUseCases.includes(useCase.id) && <Check className="h-4 w-4 text-black" />}
+                      <div className="flex items-center justify-between">
+                        <span>{useCase.label}</span>
+                        {selectedUseCases.includes(useCase.id) && <Check className="h-4 w-4" />}
+                      </div>
                     </button>
                   ))}
                 </div>
               </div>
             )}
 
-            {/* Navigation buttons */}
-            <div className="flex justify-between mt-8">
-              {step > 1 ? (
-                <Button type="button" variant="outline" onClick={prevStep} className="flex items-center gap-2">
-                  <ArrowLeft className="h-4 w-4" /> Back
+            {/* Navigation */}
+            {!success && (
+              <div className="flex justify-between mt-8">
+                {step > 1 ? (
+                  <Button type="button" variant="outline" onClick={prevStep}>
+                    <ArrowLeft className="h-4 w-4 mr-2" />
+                    Back
+                  </Button>
+                ) : (
+                  <div />
+                )}
+                <Button
+                  type="button"
+                  onClick={nextStep}
+                  disabled={isNextDisabled() || isLoading}
+                  className="bg-[#d8f950] text-black hover:bg-[#c2e340]"
+                >
+                  {isLoading ? (
+                    "Creating account..."
+                  ) : step === 3 ? (
+                    "Create account"
+                  ) : (
+                    <>
+                      Continue
+                      <ArrowRight className="h-4 w-4 ml-2" />
+                    </>
+                  )}
                 </Button>
-              ) : (
-                <div></div>
-              )}
-              <Button
-                type="button"
-                onClick={nextStep}
-                disabled={isNextDisabled()}
-                className="bg-[#d8f950] text-black hover:bg-[#c2e340] flex items-center gap-2"
-              >
-                {step === 3 ? "Complete" : "Next"} {step < 3 && <ArrowRight className="h-4 w-4" />}
-              </Button>
-            </div>
-          </div>
-
-          {/* Sign in link */}
-          <div className="text-center mt-6">
-            <p className="text-sm text-gray-600">
-              Already have an account?{" "}
-              <Link href="/login" className="text-black font-medium hover:underline">
-                Sign in
-              </Link>
-            </p>
+              </div>
+            )}
+            
+            {/* If email verification is needed, show login link */}
+            {success && (
+              <div className="mt-6 text-center">
+                <p className="mb-4 text-sm text-gray-600">
+                  Already verified your email?
+                </p>
+                <Button
+                  type="button"
+                  onClick={() => router.push('/login')}
+                  className="bg-[#d8f950] text-black hover:bg-[#c2e340]"
+                >
+                  Go to Login
+                </Button>
+              </div>
+            )}
           </div>
         </div>
       </main>
