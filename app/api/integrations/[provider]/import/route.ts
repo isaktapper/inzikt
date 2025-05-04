@@ -1,15 +1,61 @@
 import { NextResponse } from 'next/server';
 import { adminSupabase } from '@/utils/supabase/server';
+import { createClient } from '@supabase/supabase-js';
+import { cookies } from 'next/headers';
 
 // Utility function to add delay between API requests
 function delay(ms: number) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
+// Function to trigger ticket analysis after import completes
+async function triggerAutomaticAnalysis(userId: string) {
+  try {
+    console.log(`Triggering automatic ticket analysis for user ${userId} after import completion`);
+    
+    // Get base URL, falling back to localhost if environment variable is missing
+    const baseUrl = process.env.NEXT_PUBLIC_APP_URL || 
+                   (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'http://localhost:3000');
+    
+    console.log(`Using base URL for analysis: ${baseUrl}`);
+    
+    // Create a JWT token with the service role
+    // This is a server-to-server call so we can use the service role key
+    const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
+    
+    const analysisResponse = await fetch(`${baseUrl}/api/analyze-tickets`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        // We're skipping the auth header and using the service role internally
+        // The userId in the body will be used to identify which user's tickets to analyze
+      },
+      body: JSON.stringify({ 
+        userId,
+        // Include a secret key that your API can check to verify this is a legitimate internal call
+        serviceKey: serviceRoleKey.slice(-8) // Use last 8 chars as a simple verification
+      })
+    });
+    
+    if (analysisResponse.ok) {
+      const analysisResult = await analysisResponse.json();
+      console.log(`Successfully triggered ticket analysis, analyzing ${analysisResult.count || 0} tickets`);
+      return { success: true, count: analysisResult.count || 0 };
+    } else {
+      const errorData = await analysisResponse.json();
+      console.error(`Failed to trigger automatic analysis: ${errorData.error || 'Unknown error'}`);
+      return { success: false, error: errorData.error || 'Unknown error' };
+    }
+  } catch (analysisError) {
+    console.error('Error triggering automatic ticket analysis:', analysisError);
+    return { success: false, error: analysisError instanceof Error ? analysisError.message : 'Unknown error' };
+  }
+}
+
 interface ImportConfig {
   selectedGroups: string[];
   selectedStatuses: string[];
-  daysBack: number;
+  ticketCount: number;
   importFrequency: 'manual' | 'daily' | 'weekly' | 'hourly';
 }
 
@@ -157,7 +203,7 @@ export async function POST(
       importConfig = {
         selectedGroups: existingConfig.selected_groups || [],
         selectedStatuses: existingConfig.selected_statuses || [],
-        daysBack: existingConfig.days_back || 30,
+        ticketCount: existingConfig.ticket_count || 30,
         importFrequency: existingConfig.import_frequency || 'manual'
       };
     } else {
@@ -202,14 +248,13 @@ export async function POST(
         message: `Import from ${provider} started in background. This may take a few minutes.`,
         importDetails: {
           provider,
-          daysBack: importConfig.daysBack,
+          ticketCount: importConfig.ticketCount,
           selectedGroups: importConfig.selectedGroups.length,
           selectedStatuses: importConfig.selectedStatuses.length
         }
       });
       
       // Start the background process after the response has been sent
-      // This is a proper way to handle background processing in Next.js API routes
       const runBackgroundProcess = async () => {
         console.log("✅ Background process started for job:", jobId);
         
@@ -225,13 +270,6 @@ export async function POST(
             })
             .eq('id', jobId);
           
-          // Calculate date for filtering tickets
-          const daysAgo = new Date();
-          daysAgo.setDate(daysAgo.getDate() - importConfig.daysBack);
-          
-          // Convert to UNIX timestamp in seconds for the Zendesk API
-          const startTime = Math.floor(daysAgo.getTime() / 1000);
-          
           // Base64 encode the auth credentials for Zendesk
           const auth = Buffer.from(`${connection.credentials.email}/token:${connection.credentials.api_token}`).toString('base64');
           
@@ -244,31 +282,16 @@ export async function POST(
             'Content-Type': 'application/json'
           };
           
-          console.log(`Starting Zendesk incremental ticket import from timestamp: ${startTime}`);
-          
-          // Start with the initial URL
-          let nextUrl = `https://${connection.credentials.subdomain}.zendesk.com/api/v2/incremental/tickets.json?start_time=${startTime}`;
+          // Start with the most recent tickets
+          let nextUrl = `https://${connection.credentials.subdomain}.zendesk.com/api/v2/tickets.json?sort_by=created_at&sort_order=desc`;
           
           // Track progress
           let pageCount = 0;
           let totalPages = 0; // Will estimate this after first page
           let totalTicketsFound = 0;
-          let previousStartTime = null; // Track previous start_time to detect loops
           
-          // Loop through all pages
-          while (nextUrl) {
-            pageCount++;
-            console.log(`Fetching Zendesk tickets from: ${nextUrl} (Page ${pageCount})`);
-            
-            // Check for repeating start_time to avoid infinite loops
-            const urlObj = new URL(nextUrl);
-            const currentStartTime = urlObj.searchParams.get('start_time');
-            if (previousStartTime && currentStartTime === previousStartTime) {
-              console.log('Detected repeating start_time in next_page – breaking to avoid infinite loop.');
-              break; // Break the loop immediately
-            }
-            previousStartTime = currentStartTime;
-            
+          // Keep fetching until we have enough tickets or no more pages
+          while (allTickets.length < importConfig.ticketCount && nextUrl) {
             try {
               // Fetch tickets from Zendesk with retry logic for rate limits
               let ticketsResponse;
@@ -333,11 +356,11 @@ export async function POST(
               totalTicketsFound += tickets.length;
               
               // If this is the first page, estimate total pages based on count and end_time
-              if (pageCount === 1 && ticketsData.end_time && ticketsData.count > 0) {
-                // Rough estimate of total pages based on tickets per page and time span
+              if (pageCount === 1 && ticketsData.count > 0) {
+                // Rough estimate of total pages based on tickets per page and desired count
                 const ticketsPerPage = tickets.length;
                 if (ticketsPerPage > 0) {
-                  totalPages = Math.ceil(ticketsData.count / ticketsPerPage);
+                  totalPages = Math.ceil(Math.min(importConfig.ticketCount, ticketsData.count) / ticketsPerPage);
                   
                   // Update job with estimated total pages
                   await adminSupabase
@@ -377,6 +400,12 @@ export async function POST(
               
               // Add filtered tickets to our collection
               allTickets = [...allTickets, ...filteredTickets];
+              
+              // If we have enough tickets, break out of the loop
+              if (allTickets.length >= importConfig.ticketCount) {
+                allTickets = allTickets.slice(0, importConfig.ticketCount);
+                break;
+              }
               
               // Update job progress every 10 pages or when we have a better total_pages estimate
               if (pageCount % 10 === 0 || !nextUrl) {
@@ -705,7 +734,7 @@ export async function POST(
               provider,
               status: 'completed',
               details: {
-                daysBack: importConfig.daysBack,
+                ticketCount: importConfig.ticketCount,
                 selectedGroups: importConfig.selectedGroups,
                 selectedStatuses: importConfig.selectedStatuses,
                 ticketsImported: processedTickets.length
@@ -732,6 +761,15 @@ export async function POST(
           
           console.log(`Zendesk import job ${jobId} completed successfully with ${processedTickets.length} tickets`);
           
+          // Automatically trigger ticket analysis after import completes
+          const analysisResult = await triggerAutomaticAnalysis(userId);
+          
+          if (analysisResult.success) {
+            console.log(`Successfully triggered ticket analysis, analyzing ${analysisResult.count} tickets`);
+          } else {
+            console.error(`Failed to trigger automatic analysis: ${analysisResult.error}`);
+          }
+          
         } catch (importError) {
           console.error('Error during background import:', importError);
           
@@ -754,12 +792,7 @@ export async function POST(
       // Return the response we prepared earlier
       return response;
     } else if (provider === 'freshdesk') {
-      // Calculate date for filtering tickets
-      const daysAgo = new Date();
-      daysAgo.setDate(daysAgo.getDate() - importConfig.daysBack);
-      const startDate = daysAgo.toISOString().split('T')[0]; // Format as YYYY-MM-DD
-      
-      // Prepare the Freshdesk API URL with appropriate filters
+      // Start with the most recent tickets
       const { subdomain, api_key } = connection.credentials;
       
       // Base64 encode the auth credentials for Freshdesk
@@ -768,7 +801,7 @@ export async function POST(
       console.log(`Fetching tickets from Freshdesk subdomain: ${subdomain}`);
       
       // API endpoints to get tickets
-      const ticketsUrl = `https://${subdomain}.freshdesk.com/api/v2/tickets?updated_since=${startDate}`;
+      const ticketsUrl = `https://${subdomain}.freshdesk.com/api/v2/tickets?order_by=created_at&order_type=desc`;
       
       // Add filter for selected groups if any
       let filteredTickets = [];
@@ -782,45 +815,38 @@ export async function POST(
       });
       
       if (!ticketsResponse.ok) {
-        let errorMessage = ticketsResponse.statusText;
-        try {
-          const errorData = await ticketsResponse.json();
-          console.error('Error fetching tickets from Freshdesk:', errorData);
-          errorMessage = JSON.stringify(errorData);
-        } catch (e) {
-          // If we can't parse JSON, just use the status text
-        }
-        throw new Error(`Failed to fetch tickets from Freshdesk: ${errorMessage}`);
+        const errorData = await ticketsResponse.json();
+        console.error('Error fetching tickets from Freshdesk:', errorData);
+        throw new Error(`Failed to fetch tickets from Freshdesk: ${errorData.error || ticketsResponse.statusText}`);
       }
       
-      const tickets = await ticketsResponse.json();
+      const ticketsData = await ticketsResponse.json();
+      let tickets = ticketsData || [];
       
-      console.log(`Retrieved ${tickets.length} tickets from Freshdesk`);
+      // Filter by status if selected
+      if (importConfig.selectedStatuses.length > 0) {
+        tickets = tickets.filter((ticket: any) => 
+          importConfig.selectedStatuses.includes(ticket.status)
+        );
+      }
       
-      // Filter tickets by group if needed
+      // Filter by group if selected
       if (importConfig.selectedGroups.length > 0) {
         const groupIds = importConfig.selectedGroups.map(g => parseInt(g));
-        filteredTickets = tickets.filter((ticket: FreshdeskTicket) => 
+        tickets = tickets.filter((ticket: any) => 
           ticket.group_id && groupIds.includes(ticket.group_id)
         );
-        console.log(`Filtered to ${filteredTickets.length} tickets in selected groups`);
-      } else {
-        filteredTickets = tickets;
       }
       
-      // Filter tickets by status if needed
-      if (importConfig.selectedStatuses.length > 0) {
-        const statusIds = importConfig.selectedStatuses.map(s => parseInt(s));
-        filteredTickets = filteredTickets.filter((ticket: FreshdeskTicket) => 
-          ticket.status && statusIds.includes(ticket.status)
-        );
-        console.log(`Filtered to ${filteredTickets.length} tickets with selected statuses`);
-      }
+      // Take only the requested number of tickets
+      tickets = tickets.slice(0, importConfig.ticketCount);
+      
+      console.log(`Retrieved ${tickets.length} tickets from Freshdesk`);
       
       // Process each ticket and add conversation data
       const processedTickets = [];
       
-      for (const ticket of filteredTickets as FreshdeskTicket[]) {
+      for (const ticket of tickets as FreshdeskTicket[]) {
         try {
           // First, get detailed ticket data to ensure we have the full description
           const ticketDetailUrl = `https://${subdomain}.freshdesk.com/api/v2/tickets/${ticket.id}`;
@@ -1109,7 +1135,7 @@ export async function POST(
           provider,
           status: 'completed',
           details: {
-            daysBack: importConfig.daysBack,
+            ticketCount: importConfig.ticketCount,
             selectedGroups: importConfig.selectedGroups,
             selectedStatuses: importConfig.selectedStatuses,
             ticketsImported: processedTickets.length,
@@ -1123,13 +1149,22 @@ export async function POST(
         console.error('Error logging import:', importLogError);
       }
       
+      // Automatically trigger ticket analysis after import completes
+      const analysisResult = await triggerAutomaticAnalysis(userId);
+      
+      if (analysisResult.success) {
+        console.log(`Successfully triggered ticket analysis, analyzing ${analysisResult.count} tickets`);
+      } else {
+        console.error(`Failed to trigger automatic analysis: ${analysisResult.error}`);
+      }
+      
       // Return success
       return NextResponse.json({
         success: true,
         message: `Import from ${provider} completed successfully`,
         importDetails: {
           provider,
-          daysBack: importConfig.daysBack,
+          ticketCount: importConfig.ticketCount,
           ticketsImported: processedTickets.length,
           selectedGroups: importConfig.selectedGroups.length,
           selectedStatuses: importConfig.selectedStatuses.length,
@@ -1138,14 +1173,49 @@ export async function POST(
       });
     } else {
       // Handle other providers (placeholder for now)
+      
+      // Simulate a completed import for other providers
+      const simulatedTicketCount = Math.floor(Math.random() * 50) + 1; // Random number of tickets
+      
+      // Log the import details
+      const { error: importLogError } = await adminSupabase
+        .from('integration_import_logs')
+        .insert({
+          user_id: userId,
+          provider,
+          status: 'completed',
+          details: {
+            ticketCount: importConfig.ticketCount,
+            selectedGroups: importConfig.selectedGroups,
+            selectedStatuses: importConfig.selectedStatuses,
+            ticketsImported: simulatedTicketCount,
+            simulated: true
+          },
+          ticket_count: simulatedTicketCount
+        });
+      
+      if (importLogError) {
+        console.error('Error logging simulated import:', importLogError);
+      }
+      
+      // Automatically trigger ticket analysis after simulated import completes
+      const analysisResult = await triggerAutomaticAnalysis(userId);
+      
+      if (analysisResult.success) {
+        console.log(`Successfully triggered ticket analysis after simulated import, analyzing ${analysisResult.count} tickets`);
+      } else {
+        console.error(`Failed to trigger automatic analysis after simulated import: ${analysisResult.error}`);
+      }
+      
       return NextResponse.json({
         success: true,
         message: `Import from ${provider} started successfully (simulated)`,
         importDetails: {
           provider,
-          daysBack: importConfig.daysBack,
+          ticketCount: importConfig.ticketCount,
           selectedGroups: importConfig.selectedGroups.length,
-          selectedStatuses: importConfig.selectedStatuses.length
+          selectedStatuses: importConfig.selectedStatuses.length,
+          simulatedTickets: simulatedTicketCount
         }
       });
     }

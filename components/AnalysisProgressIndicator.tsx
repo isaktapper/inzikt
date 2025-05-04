@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 // @ts-ignore
 import { io, Socket } from 'socket.io-client'
 import { createClientComponentClient } from '@supabase/auth-helpers-nextjs'
+import { CancelAnalysisButton } from "@/components/CancelAnalysisButton"
 
 interface AnalysisProgressIndicatorProps {
   userId: string;
@@ -112,14 +113,17 @@ export function AnalysisProgressIndicator({
         }
       }
       
+      // Special case: when there are no tickets to analyze
+      const isNoTicketsCase = data.totalTickets === 0 && data.processedCount === 0;
+      
       // Update job with latest progress
       await supabase
         .from('import_jobs')
         .update({
-          status: data.isCompleted ? 'completed' : 'processing',
-          progress: data.progress || 0,
-          is_completed: data.isCompleted,
-          completed_at: data.isCompleted ? new Date().toISOString() : null,
+          status: data.isCompleted || isNoTicketsCase ? 'completed' : 'processing',
+          progress: data.isCompleted || isNoTicketsCase ? 100 : (data.progress || 0),
+          is_completed: data.isCompleted || isNoTicketsCase,
+          completed_at: (data.isCompleted || isNoTicketsCase) ? new Date().toISOString() : null,
         })
         .eq('id', jobId);
         
@@ -392,5 +396,23 @@ export function AnalysisProgressIndicator({
   
   // Component doesn't render a UI element anymore
   // It just connects to the websocket and updates the progress in the Jobs dropdown
-  return null;
+  return (
+    <>
+      {progress && (
+        <div className="flex items-center">
+          <p>Analyzing tickets: {progress.ticketsAnalyzed}/{progress.totalTickets}</p>
+          
+          <div className="ml-4">
+            <CancelAnalysisButton 
+              size="sm" 
+              variant="outline" 
+              onCancel={() => {
+                if (onComplete) onComplete();
+              }}
+            />
+          </div>
+        </div>
+      )}
+    </>
+  );
 } 

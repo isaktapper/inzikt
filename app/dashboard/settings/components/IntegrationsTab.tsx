@@ -79,7 +79,7 @@ interface Status {
 interface ImportConfig {
   selectedGroups: string[];
   selectedStatuses: string[];
-  daysBack: number;
+  ticketCount: number;
   importFrequency: 'manual' | 'daily' | 'weekly' | 'hourly';
 }
 
@@ -131,19 +131,19 @@ export function IntegrationsTab() {
     zendesk: {
       selectedGroups: [],
       selectedStatuses: [],
-      daysBack: 30,
+      ticketCount: 30,
       importFrequency: 'manual'
     },
     intercom: {
       selectedGroups: [],
       selectedStatuses: [],
-      daysBack: 30,
+      ticketCount: 30,
       importFrequency: 'manual'
     },
     freshdesk: {
       selectedGroups: [],
       selectedStatuses: [],
-      daysBack: 30,
+      ticketCount: 30,
       importFrequency: 'manual'
     }
   });
@@ -736,7 +736,7 @@ export function IntegrationsTab() {
             [provider]: {
               selectedGroups: configData.selected_groups || [],
               selectedStatuses: configData.selected_statuses || [],
-              daysBack: configData.days_back || 30,
+              ticketCount: configData.ticket_count || 30,
               importFrequency: configData.import_frequency || 'manual'
             }
           }));
@@ -842,7 +842,7 @@ export function IntegrationsTab() {
         provider,
         selected_groups: importConfigs[provider].selectedGroups,
         selected_statuses: importConfigs[provider].selectedStatuses,
-        days_back: importConfigs[provider].daysBack,
+        ticket_count: importConfigs[provider].ticketCount,
         import_frequency: importConfigs[provider].importFrequency,
         user_id: data.session.user.id
       });
@@ -870,7 +870,7 @@ export function IntegrationsTab() {
           .update({
             selected_groups: importConfigs[provider].selectedGroups,
             selected_statuses: importConfigs[provider].selectedStatuses,
-            days_back: importConfigs[provider].daysBack,
+            ticket_count: importConfigs[provider].ticketCount,
             import_frequency: importConfigs[provider].importFrequency,
             updated_at: new Date().toISOString()
           })
@@ -886,7 +886,7 @@ export function IntegrationsTab() {
             provider,
             selected_groups: importConfigs[provider].selectedGroups,
             selected_statuses: importConfigs[provider].selectedStatuses,
-            days_back: importConfigs[provider].daysBack,
+            ticket_count: importConfigs[provider].ticketCount,
             import_frequency: importConfigs[provider].importFrequency,
             user_id: data.session.user.id
           });
@@ -930,7 +930,7 @@ export function IntegrationsTab() {
           ...prev[provider],
           selectedGroups: [],
           selectedStatuses: [],
-          daysBack: 30,
+          ticketCount: 30,
           importFrequency: 'manual'
         }
       }));
@@ -954,7 +954,7 @@ export function IntegrationsTab() {
           ...prev[provider],
           selectedGroups: [],
           selectedStatuses: [],
-          daysBack: 30,
+          ticketCount: 30,
           importFrequency: 'manual'
         }
       }));
@@ -1007,7 +1007,7 @@ export function IntegrationsTab() {
             ...prev[provider],
             selectedGroups: [],
             selectedStatuses: [],
-            daysBack: 30,
+            ticketCount: 30,
             importFrequency: 'manual'
           }
         }));
@@ -1145,13 +1145,13 @@ export function IntegrationsTab() {
               </div>
               
               <div className="space-y-2">
-                <Label htmlFor={`days-back-${provider}`}>Days to Import</Label>
+                <Label htmlFor={`ticket-count-${provider}`}>Tickets to Import</Label>
                 <Input
-                  id={`days-back-${provider}`}
+                  id={`ticket-count-${provider}`}
                   type="number"
                   min="1"
                   max="90"
-                  value={config.daysBack}
+                  value={config.ticketCount}
                   onChange={e => {
                     const value = parseInt(e.target.value, 10);
                     if (!isNaN(value) && value > 0) {
@@ -1159,14 +1159,14 @@ export function IntegrationsTab() {
                         ...prev,
                         [provider]: {
                           ...prev[provider],
-                          daysBack: value
+                          ticketCount: value
                         }
                       }));
                     }
                   }}
                 />
                 <p className="text-xs text-muted-foreground">
-                  Number of days of historical data to import
+                  Number of tickets to import
                 </p>
               </div>
               

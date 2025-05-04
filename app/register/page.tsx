@@ -1,26 +1,24 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { useRouter } from "next/navigation"
 import Link from "next/link"
-import { ArrowLeft, ArrowRight, Check } from "lucide-react"
+import { ArrowRight, ArrowLeft, Check } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Alert, AlertDescription } from "@/components/ui/alert"
+import { 
+  Select,
+  SelectContent, 
+  SelectItem, 
+  SelectTrigger, 
+  SelectValue 
+} from "@/components/ui/select"
+import { Checkbox } from "@/components/ui/checkbox"
 import { cn } from "@/lib/utils"
 import { createClientSupabaseClient } from "@/utils/supabase/client"
-
-const useCases = [
-  { id: "customer-feedback", label: "Customer Feedback Analysis" },
-  { id: "bug-tracking", label: "Bug Tracking & Prioritization" },
-  { id: "feature-requests", label: "Feature Request Management" },
-  { id: "sentiment-analysis", label: "Customer Sentiment Analysis" },
-  { id: "support-efficiency", label: "Support Team Efficiency" },
-]
-
-const roles = ["Product Manager", "Customer Support Lead", "CTO", "Founder", "UX Researcher", "Other"]
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 
 export default function RegisterPage() {
   const router = useRouter()
@@ -28,29 +26,95 @@ export default function RegisterPage() {
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState<string | null>(null)
   const [isLoading, setIsLoading] = useState(false)
-  const [supabase] = useState(() => createClientSupabaseClient())
   const [formData, setFormData] = useState({
     name: "",
     email: "",
     password: "",
     company: "",
     role: "",
-    useCase: "",
+    ticketsPerMonth: "",
+    mainGoal: "",
+    heardFrom: ""
   })
+  
+  // List of potential use cases from which users can select
+  const useCases = [
+    { id: "reduce_support_volume", label: "Reduce support volume" },
+    { id: "improve_product", label: "Improve product based on feedback" },
+    { id: "understand_customers", label: "Better understand customers" },
+    { id: "identify_trends", label: "Identify support trends" },
+    { id: "prioritize_issues", label: "Prioritize which issues to fix" },
+    { id: "increase_csat", label: "Increase customer satisfaction" }
+  ]
+
+  // Main goals options
+  const mainGoals = [
+    { id: "automate_tagging", label: "Automate tagging and categorization" },
+    { id: "get_customer_insights", label: "Get insights from customer feedback" },
+    { id: "improve_support_efficiency", label: "Improve support team efficiency" },
+    { id: "track_product_issues", label: "Track product issues and bugs" },
+    { id: "understand_customer_needs", label: "Better understand customer needs" }
+  ]
+
+  // How did you hear about us options
+  const referralSources = [
+    { id: "producthunt", label: "ProductHunt" },
+    { id: "twitter", label: "Twitter" },
+    { id: "referral", label: "Referral" },
+    { id: "other", label: "Other" }
+  ]
+  
   const [selectedUseCases, setSelectedUseCases] = useState<string[]>([])
+  const [supabase] = useState(() => createClientSupabaseClient())
+  const [selectedPlan, setSelectedPlan] = useState<string | null>(null)
+  const [selectedPeriod, setSelectedPeriod] = useState<string>('monthly')
+
+  useEffect(() => {
+    // Check for plan and period in URL parameters
+    const params = new URLSearchParams(window.location.search)
+    const plan = params.get('plan')
+    const period = params.get('period')
+    
+    if (plan) {
+      setSelectedPlan(plan)
+      console.log('Found plan in URL:', plan)
+      
+      // Store in sessionStorage for later use
+      try {
+        sessionStorage.setItem('selectedPlan', plan)
+        console.log('Stored plan in sessionStorage')
+      } catch (error) {
+        console.error('Error storing plan in sessionStorage:', error)
+      }
+    }
+
+    if (period) {
+      setSelectedPeriod(period)
+      console.log('Found period in URL:', period)
+      
+      // Store in sessionStorage for later use
+      try {
+        sessionStorage.setItem('selectedPeriod', period)
+        console.log('Stored period in sessionStorage')
+      } catch (error) {
+        console.error('Error storing period in sessionStorage:', error)
+      }
+    }
+  }, [])
 
   const updateFormData = (field: string, value: string) => {
-    setFormData((prev) => ({ ...prev, [field]: value }))
+    setFormData({
+      ...formData,
+      [field]: value
+    })
   }
 
   const toggleUseCase = (id: string) => {
-    setSelectedUseCases((prev) => {
-      if (prev.includes(id)) {
-        return prev.filter((item) => item !== id)
-      } else {
-        return [...prev, id]
-      }
-    })
+    if (selectedUseCases.includes(id)) {
+      setSelectedUseCases(selectedUseCases.filter(item => item !== id))
+    } else {
+      setSelectedUseCases([...selectedUseCases, id])
+    }
   }
 
   const handleSignUp = async () => {
@@ -90,15 +154,35 @@ export default function RegisterPage() {
             .from('profiles')
             .insert({
               id: authData.user.id,
+              email: formData.email,
               full_name: formData.name,
               company: formData.company,
               role: formData.role,
-              use_cases: selectedUseCases
+              use_cases: selectedUseCases,
+              usage_this_month: 0,
+              tickets_per_month: formData.ticketsPerMonth,
+              main_goal: formData.mainGoal,
+              heard_from: formData.heardFrom,
+              plan_active: false,
+              // Store the selected plan and period in the profile for backup
+              selected_plan: selectedPlan,
+              selected_period: selectedPeriod
             })
 
           if (profileError) {
             console.error("Profile creation error:", profileError)
             // Don't throw here - we want to still show the email verification message
+          }
+
+          // Store selected plan (if any) in session storage for after verification
+          if (selectedPlan) {
+            try {
+              sessionStorage.setItem('selectedPlan', selectedPlan)
+              sessionStorage.setItem('selectedPeriod', selectedPeriod)
+              console.log("Stored selected plan in sessionStorage:", selectedPlan, "with period:", selectedPeriod)
+            } catch (storageError) {
+              console.error("Error storing plan in sessionStorage:", storageError)
+            }
           }
         } catch (profileError) {
           console.error("Error creating profile:", profileError)
@@ -119,7 +203,7 @@ export default function RegisterPage() {
       console.error("Signup error:", error)
       
       // Handle specific error cases
-      if (error.message.includes("already registered")) {
+      if (error.message?.includes("already registered")) {
         setError("This email is already registered. Please sign in or use a different email.")
       } else {
         setError(error.message || "Failed to create account")
@@ -130,7 +214,7 @@ export default function RegisterPage() {
   }
 
   const nextStep = async () => {
-    if (step < 3) {
+    if (step < 4) {
       setStep(step + 1)
     } else {
       await handleSignUp()
@@ -148,22 +232,24 @@ export default function RegisterPage() {
       return !formData.name || !formData.email || !formData.password || !formData.email.includes("@") || formData.password.length < 6
     }
     if (step === 2) {
-      return !formData.company || !formData.role
+      return !formData.company || !formData.role || !formData.ticketsPerMonth
     }
     if (step === 3) {
-      return selectedUseCases.length === 0
+      return !formData.mainGoal
+    }
+    if (step === 4) {
+      return !formData.heardFrom
     }
     return false
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 flex flex-col">
+    <div className="min-h-screen bg-orange-50/30 flex flex-col">
       {/* Header */}
       <header className="border-b bg-white">
         <div className="container flex h-16 items-center">
           <Link href="/" className="flex items-center gap-2">
-            <img src="/inzikt_logo.svg" alt="Inzikt Logo" className="h-10 w-10" style={{ filter: 'brightness(0) saturate(100%) invert(41%) sepia(94%) saturate(749%) hue-rotate(202deg) brightness(99%) contrast(101%)' }} />
-            <span className="font-bold text-xl text-[#6366F1]">Inzikt</span>
+            <img src="/inzikt_logo.svg" alt="Inzikt Logo" className="h-8 w-auto" />
           </Link>
         </div>
       </header>
@@ -171,19 +257,19 @@ export default function RegisterPage() {
       {/* Main content */}
       <main className="flex-1 flex items-center justify-center p-4">
         <div className="w-full max-w-md">
-          <div className="bg-white rounded-xl border shadow-sm p-6 md:p-8">
+          <div className="bg-white rounded-xl border shadow-sm p-6 md:p-8 hover:shadow-md transition-all duration-300">
             {/* Progress indicator */}
             <div className="mb-8">
               <div className="flex items-center justify-between mb-2">
-                {[1, 2, 3].map((i) => (
+                {[1, 2, 3, 4].map((i) => (
                   <div
                     key={i}
                     className={cn(
-                      "flex items-center justify-center w-8 h-8 rounded-full text-sm font-medium",
+                      "flex items-center justify-center w-8 h-8 rounded-full text-sm font-medium transition-all duration-300",
                       step === i
-                        ? "bg-[#d8f950] text-black"
+                        ? "bg-gradient-to-r from-orange-400 to-pink-500 text-white"
                         : step > i
-                          ? "bg-[#d8f950] text-black"
+                          ? "bg-gradient-to-r from-orange-400 to-pink-500 text-white"
                           : "bg-gray-100 text-gray-400",
                     )}
                   >
@@ -193,15 +279,15 @@ export default function RegisterPage() {
               </div>
               <div className="relative h-1 bg-gray-100 rounded-full overflow-hidden">
                 <div
-                  className="absolute top-0 left-0 h-full bg-[#d8f950] transition-all duration-300 ease-in-out"
-                  style={{ width: `${((step - 1) / 2) * 100}%` }}
+                  className="absolute top-0 left-0 h-full bg-gradient-to-r from-orange-400 to-pink-500 transition-all duration-300 ease-in-out"
+                  style={{ width: `${((step - 1) / 3) * 100}%` }}
                 ></div>
               </div>
-              <div className="mt-2 text-sm text-gray-500 text-center">Step {step} of 3</div>
+              <div className="mt-2 text-sm text-gray-500 text-center">Step {step} of 4</div>
             </div>
 
             {error && (
-              <Alert variant="destructive" className="mb-4">
+              <Alert variant="destructive" className="mb-4 bg-red-50 border-red-200 text-red-800">
                 <AlertDescription>{error}</AlertDescription>
               </Alert>
             )}
@@ -216,7 +302,7 @@ export default function RegisterPage() {
             {step === 1 && (
               <div className="space-y-6">
                 <div className="text-center mb-6">
-                  <h1 className="text-2xl font-bold mb-2">Create your account</h1>
+                  <h1 className="text-2xl font-bold mb-2 text-[#0E0E10]">Create your account</h1>
                   <p className="text-gray-600">Let's get started with your Inzikt journey</p>
                 </div>
 
@@ -228,6 +314,7 @@ export default function RegisterPage() {
                       placeholder="Enter your name"
                       value={formData.name}
                       onChange={(e) => updateFormData("name", e.target.value)}
+                      className="border-gray-300 focus:border-orange-400 focus:ring focus:ring-orange-200 focus:ring-opacity-50"
                     />
                   </div>
 
@@ -239,6 +326,7 @@ export default function RegisterPage() {
                       placeholder="you@company.com"
                       value={formData.email}
                       onChange={(e) => updateFormData("email", e.target.value)}
+                      className="border-gray-300 focus:border-orange-400 focus:ring focus:ring-orange-200 focus:ring-opacity-50"
                     />
                   </div>
 
@@ -247,22 +335,23 @@ export default function RegisterPage() {
                     <Input
                       id="password"
                       type="password"
-                      placeholder="••••••••"
+                      placeholder="Create a password"
                       value={formData.password}
                       onChange={(e) => updateFormData("password", e.target.value)}
+                      className="border-gray-300 focus:border-orange-400 focus:ring focus:ring-orange-200 focus:ring-opacity-50"
                     />
-                    <p className="text-sm text-gray-500">Must be at least 6 characters</p>
+                    <p className="text-xs text-gray-500">Must be at least 6 characters</p>
                   </div>
                 </div>
               </div>
             )}
 
-            {/* Step 2: Company Name + Role */}
+            {/* Step 2: Company & Role */}
             {step === 2 && (
               <div className="space-y-6">
                 <div className="text-center mb-6">
-                  <h1 className="text-2xl font-bold mb-2">Company details</h1>
-                  <p className="text-gray-600">Tell us about your organization</p>
+                  <h1 className="text-2xl font-bold mb-2 text-[#0E0E10]">Tell us about yourself</h1>
+                  <p className="text-gray-600">Help us tailor your experience</p>
                 </div>
 
                 <div className="space-y-4">
@@ -270,24 +359,48 @@ export default function RegisterPage() {
                     <Label htmlFor="company">Company Name</Label>
                     <Input
                       id="company"
-                      placeholder="Enter your company name"
+                      placeholder="Your company"
                       value={formData.company}
                       onChange={(e) => updateFormData("company", e.target.value)}
+                      className="border-gray-300 focus:border-orange-400 focus:ring focus:ring-orange-200 focus:ring-opacity-50"
                     />
                   </div>
 
                   <div className="space-y-2">
                     <Label htmlFor="role">Your Role</Label>
-                    <Select value={formData.role} onValueChange={(value) => updateFormData("role", value)}>
-                      <SelectTrigger id="role">
+                    <Select 
+                      value={formData.role} 
+                      onValueChange={(value) => updateFormData("role", value)}
+                    >
+                      <SelectTrigger className="border-gray-300 focus:border-orange-400 focus:ring focus:ring-orange-200 focus:ring-opacity-50">
                         <SelectValue placeholder="Select your role" />
                       </SelectTrigger>
                       <SelectContent>
-                        {roles.map((role) => (
-                          <SelectItem key={role} value={role}>
-                            {role}
-                          </SelectItem>
-                        ))}
+                        <SelectItem value="founder">Founder / CEO</SelectItem>
+                        <SelectItem value="product">Product Manager</SelectItem>
+                        <SelectItem value="support">Support Lead</SelectItem>
+                        <SelectItem value="engineering">Engineering</SelectItem>
+                        <SelectItem value="marketing">Marketing</SelectItem>
+                        <SelectItem value="other">Other</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="ticketsPerMonth">How many tickets do you process per month?</Label>
+                    <Select 
+                      value={formData.ticketsPerMonth} 
+                      onValueChange={(value) => updateFormData("ticketsPerMonth", value)}
+                    >
+                      <SelectTrigger className="border-gray-300 focus:border-orange-400 focus:ring focus:ring-orange-200 focus:ring-opacity-50">
+                        <SelectValue placeholder="Select ticket volume" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="<500">Less than 500</SelectItem>
+                        <SelectItem value="500-2000">500 - 2,000</SelectItem>
+                        <SelectItem value="2000-5000">2,000 - 5,000</SelectItem>
+                        <SelectItem value="5000-10000">5,000 - 10,000</SelectItem>
+                        <SelectItem value=">10000">More than 10,000</SelectItem>
                       </SelectContent>
                     </Select>
                   </div>
@@ -295,81 +408,121 @@ export default function RegisterPage() {
               </div>
             )}
 
-            {/* Step 3: Select Use Case */}
+            {/* Step 3: Main Goal */}
             {step === 3 && (
               <div className="space-y-6">
                 <div className="text-center mb-6">
-                  <h1 className="text-2xl font-bold mb-2">How will you use Inzikt?</h1>
-                  <p className="text-gray-600">Select all that apply to customize your experience</p>
+                  <h1 className="text-2xl font-bold mb-2 text-[#0E0E10]">What is your main goal with Inzikt?</h1>
+                  <p className="text-gray-600">Help us understand how we can best assist you</p>
                 </div>
 
-                <div className="space-y-3">
-                  {useCases.map((useCase) => (
-                    <button
-                      key={useCase.id}
-                      type="button"
-                      onClick={() => toggleUseCase(useCase.id)}
-                      className={cn(
-                        "w-full p-4 text-left border rounded-lg transition-colors",
-                        selectedUseCases.includes(useCase.id)
-                          ? "border-black bg-black/5"
-                          : "border-gray-200 hover:border-gray-300"
-                      )}
-                    >
-                      <div className="flex items-center justify-between">
-                        <span>{useCase.label}</span>
-                        {selectedUseCases.includes(useCase.id) && <Check className="h-4 w-4" />}
+                <div className="space-y-4">
+                  <RadioGroup 
+                    value={formData.mainGoal}
+                    onValueChange={(value) => updateFormData("mainGoal", value)}
+                    className="space-y-3"
+                  >
+                    {mainGoals.map((goal) => (
+                      <div 
+                        key={goal.id}
+                        className="flex items-center space-x-3 border rounded-lg p-3 hover:border-orange-300 transition-colors"
+                        onClick={() => updateFormData("mainGoal", goal.id)}
+                      >
+                        <RadioGroupItem value={goal.id} id={`goal-${goal.id}`} className="flex-shrink-0" />
+                        <Label 
+                          htmlFor={`goal-${goal.id}`} 
+                          className="w-full cursor-pointer"
+                        >
+                          {goal.label}
+                        </Label>
                       </div>
-                    </button>
-                  ))}
+                    ))}
+                  </RadioGroup>
                 </div>
               </div>
             )}
 
-            {/* Navigation */}
-            {!success && (
-              <div className="flex justify-between mt-8">
-                {step > 1 ? (
-                  <Button type="button" variant="outline" onClick={prevStep}>
-                    <ArrowLeft className="h-4 w-4 mr-2" />
+            {/* Step 4: How did you hear about us */}
+            {step === 4 && (
+              <div className="space-y-6">
+                <div className="text-center mb-6">
+                  <h1 className="text-2xl font-bold mb-2 text-[#0E0E10]">How did you hear about us?</h1>
+                  <p className="text-gray-600">We're curious to know where you found us</p>
+                </div>
+
+                <div className="space-y-4">
+                  <RadioGroup
+                    value={formData.heardFrom}
+                    onValueChange={(value) => updateFormData("heardFrom", value)}
+                    className="space-y-3"
+                  >
+                    {referralSources.map((source) => (
+                      <div
+                        key={source.id}
+                        className="flex items-center space-x-3 border rounded-lg p-3 hover:border-orange-300 transition-colors"
+                        onClick={() => updateFormData("heardFrom", source.id)}
+                      >
+                        <RadioGroupItem value={source.id} id={`source-${source.id}`} className="flex-shrink-0" />
+                        <Label
+                          htmlFor={`source-${source.id}`}
+                          className="w-full cursor-pointer"
+                        >
+                          {source.label}
+                        </Label>
+                      </div>
+                    ))}
+                  </RadioGroup>
+                </div>
+              </div>
+            )}
+
+            {/* Success message when email verification is needed */}
+            {success ? (
+              <div className="space-y-6">
+                <div className="flex justify-center">
+                  <Button
+                    onClick={() => {
+                      // Simply refreshes the page to start again - most common action
+                      window.location.reload()
+                    }}
+                    className="mt-4"
+                  >
+                    Sign out
+                  </Button>
+                </div>
+              </div>
+            ) : (
+              <div className="flex justify-between mt-6">
+                {step > 1 && (
+                  <Button
+                    onClick={prevStep}
+                    variant="outline"
+                    disabled={isLoading}
+                    className="flex items-center"
+                  >
+                    <ArrowLeft className="mr-2 h-4 w-4" />
                     Back
                   </Button>
-                ) : (
-                  <div />
                 )}
-                <Button
-                  type="button"
-                  onClick={nextStep}
-                  disabled={isNextDisabled() || isLoading}
-                  className="bg-[#d8f950] text-black hover:bg-[#c2e340]"
-                >
-                  {isLoading ? (
-                    "Creating account..."
-                  ) : step === 3 ? (
-                    "Create account"
-                  ) : (
-                    <>
-                      Continue
-                      <ArrowRight className="h-4 w-4 ml-2" />
-                    </>
-                  )}
-                </Button>
-              </div>
-            )}
-            
-            {/* If email verification is needed, show login link */}
-            {success && (
-              <div className="mt-6 text-center">
-                <p className="mb-4 text-sm text-gray-600">
-                  Already verified your email?
-                </p>
-                <Button
-                  type="button"
-                  onClick={() => router.push('/login')}
-                  className="bg-[#d8f950] text-black hover:bg-[#c2e340]"
-                >
-                  Go to Login
-                </Button>
+                <div className={step === 1 ? "w-full" : ""}>
+                  <Button
+                    onClick={nextStep}
+                    disabled={isNextDisabled() || isLoading}
+                    className={cn(
+                      "flex items-center bg-gradient-to-r from-orange-400 to-pink-500 hover:from-orange-500 hover:to-pink-600",
+                      step === 1 ? "w-full" : "ml-auto"
+                    )}
+                  >
+                    {step === 4 ? (
+                      isLoading ? "Creating Account..." : "Create Account"
+                    ) : (
+                      <>
+                        Next
+                        <ArrowRight className="ml-2 h-4 w-4" />
+                      </>
+                    )}
+                  </Button>
+                </div>
               </div>
             )}
           </div>

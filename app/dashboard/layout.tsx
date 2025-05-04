@@ -8,7 +8,6 @@ import {
   Home,
   Tag,
   MessageSquare,
-  Bell,
   Settings,
   LogOut,
   ChevronDown,
@@ -19,6 +18,8 @@ import {
   Check,
   Sparkles,
   Briefcase,
+  ServerCog,
+  ShoppingBag,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
@@ -37,6 +38,7 @@ import { getUserProfile, Profile } from "@/lib/getUserProfile"
 import { useAnalysisProgress } from '@/contexts/AnalysisProgressContext'
 import { toast } from "@/components/ui/use-toast"
 import { JobsDropdown } from "@/components/JobsDropdown"
+import { ActiveJobsBadge } from "@/components/ActiveJobsBadge"
 
 interface NavItem {
   href: string
@@ -54,7 +56,9 @@ const navItems: NavItem[] = [
   { href: "/dashboard", icon: Home, label: "Dashboard" },
   { href: "/dashboard/insights", icon: BarChart3, label: "Insights" },
   { href: "/dashboard/tickets", icon: MessageSquare, label: "Tickets" },
+  { href: "/dashboard/recommendations", icon: ShoppingBag, label: "Recommendations" },
   { href: "/dashboard/tags", icon: Tag, label: "Tags" },
+  { href: "/jobs", icon: ServerCog, label: "Jobs" },
 ]
 
 export default function DashboardLayout({
@@ -64,7 +68,6 @@ export default function DashboardLayout({
 }) {
   const pathname = usePathname()
   const router = useRouter()
-  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false)
   const [hasTicketsToAnalyze, setHasTicketsToAnalyze] = useState(true)
   const [isAnalyzingTickets, setIsAnalyzingTickets] = useState(false)
   const [userProfile, setUserProfile] = useState<DashboardUserProfile | null>(null)
@@ -84,6 +87,26 @@ export default function DashboardLayout({
         if (!user) {
           console.log("No authenticated user found, redirecting to login");
           router.push('/login');
+          return;
+        }
+        
+        // Fetch the full profile data from Supabase to check the payment status
+        const { data: fullProfile, error: fullProfileError } = await supabase
+          .from('profiles')
+          .select('*')
+          .eq('id', user.id)
+          .single();
+        
+        if (fullProfileError) {
+          console.error("Error fetching full profile:", fullProfileError);
+          router.push('/login');
+          return;
+        }
+        
+        // Check if the user has an active plan
+        if (fullProfile && fullProfile.plan_active !== true) {
+          console.log("User does not have an active plan, redirecting to payment");
+          router.push('/billing/plans');
           return;
         }
         
@@ -211,8 +234,8 @@ export default function DashboardLayout({
     
     setIsAnalyzingTickets(true);
     try {
-      // Start the progress tracking
-      startAnalysis(userProfile.id);
+      // Start the progress tracking - provide a temporary job ID until we get the real one
+      startAnalysis(userProfile.id, 'temp-job-id');
       
       // Send the user ID with the request
       const response = await fetch('/api/analyze-tickets', {
@@ -254,7 +277,7 @@ export default function DashboardLayout({
   };
 
   return (
-    <div className="flex min-h-screen bg-background">
+    <div className="flex flex-col min-h-screen bg-background">
       {/* Only render content when loading is complete */}
       {loading ? (
         <div className="flex items-center justify-center w-full min-h-screen">
@@ -265,162 +288,133 @@ export default function DashboardLayout({
           {/* Tag Setup Modal */}
           <TagSetupModal />
           
-          {/* Sidebar */}
-          <aside 
-            className={cn(
-              "fixed left-0 top-0 z-40 h-screen bg-white border-r transition-all duration-300",
-              isSidebarCollapsed ? "w-20" : "w-64"
-            )}
-          >
-            {/* Logo */}
-            <div className="flex items-center h-16 px-4 border-b">
-              <Link href="/" className="flex items-center gap-2">
-                {/* Logo logic for Inzikt */}
-                {isSidebarCollapsed ? (
-                  <img src="/inzikt_icon.svg" alt="Inzikt Icon" className="h-12 w-12" style={{ filter: 'brightness(0) saturate(100%) invert(41%) sepia(94%) saturate(749%) hue-rotate(202deg) brightness(99%) contrast(101%)' }} />
-                ) : (
-                  <img src="/inzikt_logo.svg" alt="Inzikt Logo" className="h-12 w-12" style={{ filter: 'brightness(0) saturate(100%) invert(41%) sepia(94%) saturate(749%) hue-rotate(202deg) brightness(99%) contrast(101%)' }} />
-                )}
+          {/* Main Header */}
+          <header className="fixed top-0 left-0 right-0 z-50 h-16 border-b bg-white flex items-center px-6">
+            <div className="flex items-center h-full">
+              <Link href="/" className="flex items-center mr-6">
+                <img 
+                  src="/inzikt_logo.svg" 
+                  alt="Inzikt Logo" 
+                  className="h-8 w-auto" 
+                />
               </Link>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="ml-auto"
-                onClick={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
-              >
-                <Menu className="h-5 w-5" />
-              </Button>
+            </div>
+            
+            {/* Search */}
+            <div className="flex-1 max-w-xl ml-4">
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-500" />
+                <Input 
+                  type="search" 
+                  placeholder="Search tickets..." 
+                  className="w-full pl-10"
+                />
+              </div>
             </div>
 
-            {/* Navigation */}
-            <nav className="p-4 space-y-2">
-              {navItems.map((item) => {
-                const Icon = item.icon
-                const isActive = pathname === item.href
-                return (
-                  <Link
-                    key={item.href}
-                    href={item.href}
-                    className={cn(
-                      "flex items-center gap-3 px-3 py-2 rounded-md transition-colors",
-                      isActive 
-                        ? "bg-accent text-primary font-medium" 
-                        : "hover:bg-gray-100"
+            {/* Header Actions */}
+            <div className="flex items-center gap-4 ml-auto">
+              <Button 
+                size="sm" 
+                className={hasTicketsToAnalyze ? "bg-primary text-white hover:bg-primary/90" : "bg-gray-100 text-gray-500"}
+                onClick={handleAnalyzeTickets}
+                disabled={isAnalyzingTickets || !hasTicketsToAnalyze || isAnalyzing}
+              >
+                {isAnalyzingTickets || isAnalyzing ? (
+                  <>
+                    <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
+                    Analyzing...
+                  </>
+                ) : (
+                  <>
+                    <Sparkles className="h-4 w-4 mr-2" />
+                    Analyze Tickets
+                  </>
+                )}
+              </Button>
+              
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <button className="flex items-center gap-2">
+                    {userProfile?.avatar_url ? (
+                      <img 
+                        src={userProfile.avatar_url} 
+                        alt={userProfile.full_name || 'User'} 
+                        className="rounded-full w-8 h-8 object-cover"
+                      />
+                    ) : (
+                      <div className="bg-primary rounded-full w-8 h-8 flex items-center justify-center font-bold text-white">
+                        {getUserInitials()}
+                      </div>
                     )}
-                  >
-                    <Icon className="h-5 w-5 shrink-0" />
-                    {!isSidebarCollapsed && (
-                      <span>{item.label}</span>
-                    )}
-                  </Link>
-                )
-              })}
-            </nav>
-          </aside>
-    
-          {/* Main Content */}
-          <div className={cn(
-            "flex-1 transition-all duration-300",
-            isSidebarCollapsed ? "ml-20" : "ml-64"
-          )}>
-            {/* Top Bar */}
-            <header className="fixed top-0 right-0 z-30 h-16 border-b bg-white flex items-center justify-between px-6 gap-4"
-              style={{ width: `calc(100% - ${isSidebarCollapsed ? "5rem" : "16rem"})` }}
+                    <span className="font-medium">{userProfile?.full_name || 'Loading...'}</span>
+                    <ChevronDown className="h-4 w-4" />
+                  </button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-56">
+                  <DropdownMenuLabel>My Account</DropdownMenuLabel>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem asChild>
+                    <Link href="/dashboard/settings" className="flex items-center w-full">
+                      <Settings className="mr-2 h-4 w-4" />
+                      <span>Settings</span>
+                    </Link>
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem asChild>
+                    <Button
+                      variant="ghost"
+                      className="w-full justify-start p-0 font-normal"
+                      onClick={handleLogout}
+                    >
+                      <LogOut className="mr-2 h-4 w-4" />
+                      <span>Log out</span>
+                    </Button>
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
+          </header>
+          
+          {/* Sidebar - below header */}
+          <div className="flex mt-16 h-[calc(100vh-4rem)]">
+            <aside 
+              className="fixed left-0 top-16 z-40 h-[calc(100vh-4rem)] bg-white transition-all duration-300 w-16 hover:w-64 group/sidebar overflow-hidden"
             >
-              {/* Search */}
-              <div className="flex-1 max-w-xl">
-                <div className="relative">
-                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-500" />
-                  <Input 
-                    type="search" 
-                    placeholder="Search tickets..." 
-                    className="w-full pl-10"
-                  />
-                </div>
-              </div>
-
-              {/* Actions */}
-              <div className="flex items-center gap-4">
-                <Button 
-                  size="sm" 
-                  className={hasTicketsToAnalyze ? "bg-primary text-white hover:bg-primary/90" : "bg-gray-100 text-gray-500"}
-                  onClick={handleAnalyzeTickets}
-                  disabled={isAnalyzingTickets || !hasTicketsToAnalyze || isAnalyzing}
-                >
-                  {isAnalyzingTickets || isAnalyzing ? (
-                    <>
-                      <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
-                      Analyzing...
-                    </>
-                  ) : (
-                    <>
-                      <Sparkles className="h-4 w-4 mr-2" />
-                      Analyze Tickets
-                    </>
-                  )}
-                </Button>
-                
-                {/* Jobs Dropdown */}
-                <JobsDropdown />
-                
-                <button className="relative">
-                  <Bell className="h-5 w-5" />
-                  <span className="absolute -top-1 -right-1 bg-primary text-white text-xs w-4 h-4 flex items-center justify-center rounded-full">
-                    3
-                  </span>
-                </button>
-
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <button className="flex items-center gap-2">
-                      {userProfile?.avatar_url ? (
-                        <img 
-                          src={userProfile.avatar_url} 
-                          alt={userProfile.full_name || 'User'} 
-                          className="rounded-full w-8 h-8 object-cover"
-                        />
-                      ) : (
-                        <div className="bg-primary rounded-full w-8 h-8 flex items-center justify-center font-bold text-white">
-                          {getUserInitials()}
-                        </div>
+              {/* Navigation */}
+              <nav className="p-2 space-y-1">
+                {navItems.map((item) => {
+                  const Icon = item.icon
+                  const isActive = pathname === item.href
+                  return (
+                    <Link
+                      key={item.href}
+                      href={item.href}
+                      className={cn(
+                        "flex items-center gap-3 px-3 py-2 rounded-md transition-colors",
+                        isActive 
+                          ? "bg-accent text-primary font-medium" 
+                          : "hover:bg-gray-100"
                       )}
-                      {!isSidebarCollapsed && (
-                        <>
-                          <span className="font-medium">{userProfile?.full_name || 'Loading...'}</span>
-                          <ChevronDown className="h-4 w-4" />
-                        </>
-                      )}
-                    </button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end" className="w-56">
-                    <DropdownMenuLabel>My Account</DropdownMenuLabel>
-                    <DropdownMenuSeparator />
-                    <DropdownMenuItem asChild>
-                      <Link href="/dashboard/settings" className="flex items-center w-full">
-                        <Settings className="mr-2 h-4 w-4" />
-                        <span>Settings</span>
-                      </Link>
-                    </DropdownMenuItem>
-                    <DropdownMenuSeparator />
-                    <DropdownMenuItem asChild>
-                      <Button
-                        variant="ghost"
-                        className="w-full justify-start p-0 font-normal"
-                        onClick={handleLogout}
-                      >
-                        <LogOut className="mr-2 h-4 w-4" />
-                        <span>Log out</span>
-                      </Button>
-                    </DropdownMenuItem>
-                  </DropdownMenuContent>
-                </DropdownMenu>
-              </div>
-            </header>
-
-            {/* Page Content */}
-            <main className="pt-16 min-h-screen bg-background">
-              {children}
-            </main>
+                    >
+                      <Icon className="h-5 w-5 shrink-0" />
+                      <span className="flex-1 whitespace-nowrap opacity-0 group-hover/sidebar:opacity-100 transition-opacity duration-300">
+                        {item.label}
+                      </span>
+                      {item.href === "/jobs" && <ActiveJobsBadge />}
+                    </Link>
+                  )
+                })}
+              </nav>
+            </aside>
+      
+            {/* Main Content */}
+            <div className="flex-1 ml-16 transition-all duration-300">
+              {/* Page Content */}
+              <main className="min-h-screen bg-background p-6">
+                {children}
+              </main>
+            </div>
           </div>
         </>
       )}

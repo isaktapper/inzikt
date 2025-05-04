@@ -49,21 +49,33 @@ export function ImportProgressIndicator({
   const updateJobsDropdownProgress = (data: ImportProgress | null) => {
     if (!data) return;
     
+    console.log('Updating Jobs dropdown progress UI:', data);
+    
     const container = document.getElementById('import-progress-container');
     if (container) {
       // Update text
       const progressText = container.querySelector('div.text-xs');
       if (progressText) {
         if (data.isCompleted || data.stage === 'completed' || data.progress === 100) {
+          console.log('Updating dropdown UI to show completed state');
           progressText.textContent = `Completed: Imported ${data.totalTickets || 0} tickets`;
           
           // Also update the badge if possible
           const parentItem = container.closest('.py-2');
           if (parentItem) {
-            const badge = parentItem.querySelector('div.flex.w-full > div:last-child > *');
+            // Find the badge
+            const badge = parentItem.querySelector('.bg-blue-50, .bg-yellow-50');
             if (badge) {
-              badge.className = "bg-green-50 text-green-700 border-green-200";
+              badge.className = "inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-semibold transition-colors focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 bg-green-50 text-green-700 border-green-200";
               badge.textContent = "Completed";
+              
+              // Also update the spinner icon to checkmark
+              const spinnerIcon = parentItem.querySelector('.animate-spin');
+              if (spinnerIcon) {
+                // Remove spinner animation
+                spinnerIcon.classList.remove('animate-spin');
+                spinnerIcon.classList.add('text-green-500');
+              }
             }
           }
         } else if (data.currentTicket) {
@@ -137,9 +149,23 @@ export function ImportProgressIndicator({
       // Handle completion
       if ((data.isCompleted || data.stage === 'completed' || data.progress === 100) && onComplete) {
         // Auto-dismiss after delay
+        console.log('Job is complete, calling onComplete callback in 3 seconds');
+        
+        // Clear localStorage immediately to prevent further polling
+        if (typeof window !== 'undefined') {
+          try {
+            localStorage.removeItem('importProgressJobId');
+          } catch (error) {
+            console.error('Error removing jobId from localStorage:', error);
+          }
+        }
+        
         setTimeout(() => {
           onComplete();
         }, 3000);
+        
+        // Return early to prevent further polling
+        return;
       }
     } catch (error) {
       console.error('Error fetching import progress:', error);
@@ -171,7 +197,7 @@ export function ImportProgressIndicator({
       console.log(`Setting up Socket.io connection for job: ${jobId}`);
       
       // Connect to the Socket.io server with the correct namespace and path
-      const socket = io<ServerToClientEvents>('/import-progress', {
+      const socket = io('/import-progress', {
         path: '/api/ws',
         query: { jobId },
         transports: ['websocket'],
@@ -196,8 +222,13 @@ export function ImportProgressIndicator({
           
           // Additional completion check - mark job as completed if progress is 100%
           if (data.progress === 100 && !data.isCompleted) {
+            console.log('Progress is 100%, marking job as completed');
             data.isCompleted = true;
             data.stage = 'completed';
+          }
+          
+          if (data.isCompleted || data.stage === 'completed') {
+            console.log('Job is marked as completed in socket data');
           }
           
           setProgress(data);
@@ -208,6 +239,17 @@ export function ImportProgressIndicator({
           
           // Handle completion
           if ((data.isCompleted || data.stage === 'completed' || data.progress === 100) && onComplete) {
+            console.log('Socket detected job completion, disconnecting socket and calling onComplete');
+            
+            // Clear localStorage immediately to prevent further polling
+            if (typeof window !== 'undefined') {
+              try {
+                localStorage.removeItem('importProgressJobId');
+              } catch (error) {
+                console.error('Error removing jobId from localStorage:', error);
+              }
+            }
+            
             socket.disconnect();
             socketRef.current = null;
             
@@ -253,6 +295,21 @@ export function ImportProgressIndicator({
           const pollInterval = setInterval(() => {
             if (!socketRef.current) {
               console.log('Polling for import progress (fallback)');
+              
+              // Check if the job is already completed in localStorage
+              if (typeof window !== 'undefined') {
+                try {
+                  const savedJobId = localStorage.getItem('importProgressJobId');
+                  if (!savedJobId) {
+                    console.log('No saved jobId in localStorage, clearing interval');
+                    clearInterval(pollInterval);
+                    return;
+                  }
+                } catch (error) {
+                  console.error('Error accessing localStorage:', error);
+                }
+              }
+              
               fetchProgress();
             } else {
               // If socket gets connected later, clear the interval

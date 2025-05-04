@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { progressStore } from '../analyze-tickets/route';
+import { createClient } from '@supabase/supabase-js';
 
 // Helper to clean up old completed analyses
 const cleanupOldCompletedAnalyses = () => {
@@ -29,6 +30,32 @@ export async function GET(request: Request) {
         { error: 'userId is required' },
         { status: 400 }
       );
+    }
+    
+    // Create Supabase admin client to check the actual job status in database
+    const supabase = createClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY!
+    );
+    
+    // Check if there's an active job in the database
+    const { data: activeJob, error: jobError } = await supabase
+      .from('import_jobs')
+      .select('*')
+      .eq('user_id', userId)
+      .eq('job_type', 'analysis')
+      .or('status.eq.processing,status.eq.pending')
+      .order('created_at', { ascending: false })
+      .limit(1);
+      
+    // If there's no active job in the database but we have one in memory, 
+    // update our in-memory state to match database
+    const inMemoryProgress = progressStore[userId];
+    if (inMemoryProgress && !inMemoryProgress.isCompleted && 
+        (!activeJob || activeJob.length === 0)) {
+      // Job is completed in the database but not in memory, update memory
+      inMemoryProgress.isCompleted = true;
+      inMemoryProgress.lastUpdateTime = Date.now();
     }
     
     // Return progress data for this user if it exists

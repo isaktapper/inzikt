@@ -1,106 +1,191 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import type { Ticket } from "@/types/ticket";
 import { createClientSupabaseClient } from "@/utils/supabase/client";
 import { TicketModal } from "../components/TicketModal";
-import { Loader2, Globe } from "lucide-react";
-import TagSetupModal from "@/app/components/TagSetupModal";
+import { Loader2, AlertTriangle } from "lucide-react";
+import { TagFilter } from "./components/TagFilter";
+import { TaggedTickets } from "./components/TaggedTickets";
+import { TagStats } from "./components/TagStats";
+import { TimeFilter, DateRange, ComparisonType } from "./components/TimeFilter";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { addYears, subDays } from "date-fns";
 
 export default function TagsPage() {
   const [tickets, setTickets] = useState<Ticket[]>([]);
-  const [selectedTag, setSelectedTag] = useState<string | null>(null);
+  const [selectedTags, setSelectedTags] = useState<string[]>([]);
+  const [filterLogic, setFilterLogic] = useState<'AND' | 'OR'>('OR');
+  const [dateRange, setDateRange] = useState<DateRange | null>(null);
+  const [comparisonType, setComparisonType] = useState<ComparisonType>('none');
   const [modalTicket, setModalTicket] = useState<Ticket | null>(null);
-  const [filteredTickets, setFilteredTickets] = useState<Ticket[]>([]);
   const [isGeneratingTags, setIsGeneratingTags] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
-  const [showTagSetupModal, setShowTagSetupModal] = useState(false);
+  const [loading, setLoading] = useState(true);
 
+  // Fetch tickets
   useEffect(() => {
     const fetchTickets = async () => {
-      const supabase = createClientSupabaseClient();
-      const { data, error } = await supabase.from("tickets_with_analysis").select("*");
-      if (!error && data) setTickets(data);
+      try {
+        setLoading(true);
+        const supabase = createClientSupabaseClient();
+        const { data, error } = await supabase
+          .from("tickets_with_analysis")
+          .select("*");
+          
+        if (error) throw error;
+        setTickets(data || []);
+      } catch (error: any) {
+        setErrorMessage(error.message || "Failed to load tickets");
+        console.error("Error fetching tickets:", error);
+      } finally {
+        setLoading(false);
+      }
     };
+    
     fetchTickets();
   }, []);
 
-  useEffect(() => {
-    if (selectedTag) {
-      const filtered = tickets.filter((t) => (t.aiTags || []).includes(selectedTag));
-      setFilteredTickets(filtered);
-    } else {
-      setFilteredTickets([]);
-    }
-  }, [selectedTag, tickets]);
-
-  const tagCount: Record<string, number> = {};
-  tickets.forEach((ticket) => {
-    (ticket.aiTags || []).forEach((tag) => {
-      const clean = tag.trim();
-      if (clean) tagCount[clean] = (tagCount[clean] || 0) + 1;
+  // Filter tickets based on date range
+  const filteredTickets = useMemo(() => {
+    if (!dateRange) return tickets;
+    
+    return tickets.filter(ticket => {
+      const ticketDate = new Date(ticket.zendesk_created_at || ticket.created_at);
+      return ticketDate >= dateRange.from && ticketDate <= dateRange.to;
     });
-  });
-
-  const totalUsage = Object.values(tagCount).reduce((sum, count) => sum + count, 0);
-  const averageUsage = Object.keys(tagCount).length > 0 ? totalUsage / Object.keys(tagCount).length : 0;
+  }, [tickets, dateRange]);
   
-  const handleGenerateTags = () => {
-    // Don't use TagSetupModal when clicking Generate Tags button,
-    // since this can conflict with ticket analysis
+  // Calculate comparison period tickets
+  const comparisonTickets = useMemo(() => {
+    if (comparisonType === 'none' || !dateRange) return [];
+    
+    let comparisonFrom: Date;
+    let comparisonTo: Date;
+    
+    if (comparisonType === 'previousPeriod') {
+      // Calculate the previous period with same length
+      const periodLength = dateRange.to.getTime() - dateRange.from.getTime();
+      comparisonTo = new Date(dateRange.from.getTime() - 1); // Day before current period
+      comparisonFrom = new Date(comparisonTo.getTime() - periodLength);
+    } else if (comparisonType === 'sameLastYear') {
+      // Same period last year
+      comparisonFrom = addYears(dateRange.from, -1);
+      comparisonTo = addYears(dateRange.to, -1);
+    } else {
+      return [];
+    }
+    
+    return tickets.filter(ticket => {
+      const ticketDate = new Date(ticket.zendesk_created_at || ticket.created_at);
+      return ticketDate >= comparisonFrom && ticketDate <= comparisonTo;
+    });
+  }, [tickets, dateRange, comparisonType]);
+
+  // Build tag counts from filtered tickets
+  const tagCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    filteredTickets.forEach(ticket => {
+      (ticket.aiTags || []).forEach(tag => {
+        const clean = tag.trim();
+        if (clean) counts[clean] = (counts[clean] || 0) + 1;
+      });
+    });
+    return counts;
+  }, [filteredTickets]);
+  
+  // Build tag counts from comparison period
+  const prevTagCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    comparisonTickets.forEach(ticket => {
+      (ticket.aiTags || []).forEach(tag => {
+        const clean = tag.trim();
+        if (clean) counts[clean] = (counts[clean] || 0) + 1;
+      });
+    });
+    return counts;
+  }, [comparisonTickets]);
+
+  // Handle tag toggle for filtering
+  const handleTagToggle = (tag: string) => {
+    setSelectedTags(prev => 
+      prev.includes(tag)
+        ? prev.filter(t => t !== tag)
+        : [...prev, tag]
+    );
+  };
+  
+  // Clear all selected tags
+  const clearFilters = () => {
+    setSelectedTags([]);
+  };
+  
+  // Handle time filter changes
+  const handleTimeFilterChange = (range: DateRange | null) => {
+    setDateRange(range);
+  };
+  
+  // Handle comparison type changes
+  const handleComparisonChange = (type: ComparisonType) => {
+    setComparisonType(type);
+  };
+  
+  // Handle viewing a ticket
+  const handleViewTicket = (ticket: Ticket) => {
+    setModalTicket(ticket);
+  };
+  
+  // Generate tags if there are none
+  const handleGenerateTags = async () => {
     try {
       setIsGeneratingTags(true);
       setErrorMessage(null);
       setSuccessMessage(null);
       
-      // Use the domain-based tag generation API directly
-      const getUserDomain = async () => {
-        const supabase = createClientSupabaseClient();
-        const { data: profile } = await supabase
-          .from('profiles')
-          .select('domain')
-          .single();
-          
-        if (profile?.domain) {
-          // Call the API endpoint directly with the saved domain
-          const { data: sessionData } = await supabase.auth.getSession();
-          const authToken = sessionData?.session?.access_token;
-          
-          if (!authToken) {
-            throw new Error("Authentication required. Please log in again.");
-          }
-          
-          const response = await fetch('/api/generate-tags-from-domain', {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'Authorization': `Bearer ${authToken}`
-            },
-            body: JSON.stringify({ domain: profile.domain }),
-          });
-          
-          if (!response.ok) {
-            const errorData = await response.json();
-            throw new Error(errorData.error || 'Failed to generate tags');
-          }
-          
-          const data = await response.json();
-          setSuccessMessage(`Successfully generated ${data.tags.length} tags. Refreshing page...`);
-          
-          // Reload after a short delay
-          setTimeout(() => {
-            window.location.reload();
-          }, 2000);
-        } else {
-          // No domain saved yet, open the TagSetupModal
-          setShowTagSetupModal(true);
-        }
-      };
+      // Get user domain
+      const supabase = createClientSupabaseClient();
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('domain')
+        .single();
+        
+      if (!profile?.domain) {
+        setErrorMessage("No domain set up. Please set up your domain in settings.");
+        return;
+      }
       
-      getUserDomain();
+      // Call API to generate tags
+      const { data: sessionData } = await supabase.auth.getSession();
+      const authToken = sessionData?.session?.access_token;
+      
+      if (!authToken) {
+        throw new Error("Authentication required. Please log in again.");
+      }
+      
+      const response = await fetch('/api/generate-tags-from-domain', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${authToken}`
+        },
+        body: JSON.stringify({ domain: profile.domain }),
+      });
+      
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Failed to generate tags');
+      }
+      
+      const data = await response.json();
+      setSuccessMessage(`Successfully generated ${data.tags.length} tags. Refreshing page...`);
+      
+      // Reload after a short delay
+      setTimeout(() => {
+        window.location.reload();
+      }, 2000);
     } catch (error: any) {
       setErrorMessage(error.message || 'An error occurred while generating tags');
       console.error('Error:', error);
@@ -109,122 +194,115 @@ export default function TagsPage() {
     }
   };
 
+  // If loading, show loading state
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-[calc(100vh-6rem)]">
+        <div className="flex flex-col items-center space-y-4">
+          <Loader2 className="h-10 w-10 animate-spin text-primary" />
+          <p className="text-muted-foreground">Loading tags data...</p>
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 w-full">
-      {/* Tag Setup Modal that can be shown/hidden */}
-      {showTagSetupModal && (
-        <TagSetupModal 
-          isOpen={showTagSetupModal} 
-          onClose={() => setShowTagSetupModal(false)} 
-        />
+    <div className="p-6">
+      {/* Alert messages */}
+      {errorMessage && (
+        <Alert variant="destructive" className="mb-6">
+          <AlertTriangle className="h-4 w-4" />
+          <AlertTitle>Error</AlertTitle>
+          <AlertDescription>{errorMessage}</AlertDescription>
+        </Alert>
       )}
       
-      <Card className="w-full">
-        <CardHeader>
-          <CardTitle className="text-xl font-semibold">Tags</CardTitle>
-          <p className="text-sm text-muted-foreground">
-            AI-generated tags to help categorize and understand your support tickets.
-          </p>
-        </CardHeader>
-        <CardContent className="space-y-6">
-          {errorMessage && (
-            <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded mb-4">
-              {errorMessage}
-            </div>
-          )}
-          
-          {successMessage && (
-            <div className="bg-green-50 border border-green-200 text-green-700 px-4 py-3 rounded mb-4">
-              {successMessage}
-            </div>
-          )}
-        
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-            <StatCard title="Unique Tags" value={Object.keys(tagCount).length} />
-            <StatCard title="Total Usage" value={totalUsage} />
-            <StatCard title="Average Usage" value={averageUsage.toFixed(1)} />
-          </div>
-
-          {Object.keys(tagCount).length === 0 ? (
-            <div className="text-center py-8">
-              <p className="text-gray-500 mb-4">No tags found. Generate tags to categorize your tickets.</p>
-              <Button 
-                onClick={handleGenerateTags} 
-                className="mb-2"
-                disabled={isGeneratingTags}
-              >
-                {isGeneratingTags ? (
-                  <>
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    Generating Tags...
-                  </>
-                ) : (
-                  'Generate Tags'
-                )}
-              </Button>
-              <p className="text-xs text-gray-400 mt-2">
-                This will analyze your website to generate relevant support tags.
-              </p>
-            </div>
-          ) : (
-            <div className="flex flex-wrap gap-2">
-              {Object.entries(tagCount).map(([tag, count]) => (
-                <Button
-                  key={tag}
-                  variant="outline"
-                  className={`bg-primary text-white hover:bg-primary/90 text-sm ${selectedTag === tag ? "ring-2 ring-offset-1 ring-primary" : ""}`}
-                  onClick={() => setSelectedTag(tag)}
-                >
-                  {tag} ({count})
-                </Button>
-              ))}
-            </div>
-          )}
-        </CardContent>
-      </Card>
-
-      {selectedTag && (
-        <Card className="w-full mt-6">
-          <CardHeader>
-            <CardTitle>Tickets tagged with "{selectedTag}"</CardTitle>
-          </CardHeader>
-          <CardContent>
-            {filteredTickets.length === 0 ? (
-              <p className="text-sm text-gray-500 italic">No tickets found.</p>
-            ) : (
-              <div className="space-y-4">
-                {filteredTickets.map((ticket) => (
-                  <div
-                    key={ticket.id}
-                    className="flex items-center justify-between p-4 border rounded-lg"
-                  >
-                    <div>
-                      <p className="font-medium">{ticket.subject}</p>
-                      <p className="text-sm text-gray-500">{ticket.requester}</p>
-                    </div>
-                    <Button variant="link" onClick={() => setModalTicket(ticket)}>
-                      View details
-                    </Button>
-                  </div>
-                ))}
-              </div>
-            )}
-          </CardContent>
-        </Card>
+      {successMessage && (
+        <Alert className="mb-6 bg-green-50 border-green-200 text-green-800">
+          <AlertDescription>{successMessage}</AlertDescription>
+        </Alert>
       )}
 
+      <h1 className="text-3xl font-bold mb-6">Tags</h1>
+      
+      {/* No tags state */}
+      {Object.keys(tagCounts).length === 0 && tickets.length > 0 ? (
+        <Card className="max-w-2xl mx-auto">
+          <CardContent className="flex flex-col items-center justify-center py-12">
+            <h2 className="text-xl font-semibold mb-4">No tags available</h2>
+            <p className="text-muted-foreground text-center mb-6 max-w-md">
+              Generate AI tags to help categorize and understand your support tickets.
+            </p>
+            <Button
+              onClick={handleGenerateTags}
+              className="px-6"
+              disabled={isGeneratingTags}
+            >
+              {isGeneratingTags ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  Analyzing...
+                </>
+              ) : (
+                'Generate Tags'
+              )}
+            </Button>
+          </CardContent>
+        </Card>
+      ) : (
+        <>
+          {/* Time Filter at the top with full width */}
+          <div className="mb-6">
+            <TimeFilter 
+              onTimeFilterChange={handleTimeFilterChange}
+              onComparisonChange={handleComparisonChange}
+              ticketCount={filteredTickets.length}
+              previousTicketCount={comparisonTickets.length}
+            />
+          </div>
+            
+          {/* Tag statistics */}
+          <div className="mb-6">
+            <TagStats 
+              tagCounts={tagCounts} 
+              prevTagCounts={comparisonType !== 'none' ? prevTagCounts : undefined}
+              dateRange={dateRange}
+              comparisonType={comparisonType}
+              ticketCount={filteredTickets.length}
+              prevTicketCount={comparisonTickets.length}
+            />
+          </div>
+          
+          {/* Main content with filter sidebar and tickets */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            <div className="md:col-span-1">
+              <TagFilter 
+                tagCounts={tagCounts}
+                selectedTags={selectedTags}
+                onTagToggle={handleTagToggle}
+                onClearFilters={clearFilters}
+                filterLogic={filterLogic}
+                setFilterLogic={setFilterLogic}
+              />
+            </div>
+            
+            <div className="md:col-span-2">
+              <TaggedTickets 
+                tickets={filteredTickets}
+                selectedTags={selectedTags}
+                filterLogic={filterLogic}
+                dateRange={dateRange}
+                onViewTicket={handleViewTicket}
+              />
+            </div>
+          </div>
+        </>
+      )}
+      
+      {/* Ticket modal */}
       {modalTicket && (
         <TicketModal ticket={modalTicket} open={true} onClose={() => setModalTicket(null)} />
       )}
-    </div>
-  );
-}
-
-function StatCard({ title, value }: { title: string; value: string | number }) {
-  return (
-    <div className="p-4 border rounded-lg text-center w-full">
-      <p className="text-sm text-muted-foreground">{title}</p>
-      <p className="text-2xl font-bold mt-1">{value}</p>
     </div>
   );
 }

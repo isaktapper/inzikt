@@ -66,18 +66,26 @@ export function ImportProgressProvider({ children }: { children: React.ReactNode
   }, [])
   
   const handleComplete = useCallback(() => {
-    if (onCompleteCallback) {
-      onCompleteCallback()
-    }
-    setJobId(null)
+    console.log('Import job completed, cleaning up context state');
+    
+    // Clear from localStorage first to prevent further polling
     if (typeof window !== 'undefined') {
       try {
-        localStorage.removeItem('importProgressJobId')
+        localStorage.removeItem('importProgressJobId');
       } catch (error) {
-        console.error('Error removing jobId from localStorage:', error)
+        console.error('Error removing jobId from localStorage:', error);
       }
     }
-  }, [onCompleteCallback])
+    
+    if (onCompleteCallback) {
+      onCompleteCallback();
+    }
+    
+    // Clear state after callback
+    setJobId(null);
+    setOnCompleteCallback(undefined);
+    
+  }, [onCompleteCallback]);
   
   // Memoize the context value to prevent unnecessary re-renders
   const contextValue = React.useMemo(() => ({

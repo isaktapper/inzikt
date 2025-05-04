@@ -13,7 +13,11 @@ import {
   Calendar,
   Tag,
   Eye,
-  Sparkles
+  Sparkles,
+  TrendingUp,
+  Lightbulb,
+  PieChart,
+  BrainCircuit
 } from "lucide-react"
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -22,6 +26,7 @@ import { Button } from "@/components/ui/button"
 import { formatDistanceToNow } from 'date-fns'
 import Link from "next/link"
 import { TicketModal } from './TicketModal'
+import { RecentInsights } from '@/components/RecentInsights'
 
 interface AnalysisData {
   aiSummary: string | null;
@@ -58,6 +63,7 @@ interface DashboardStats {
   statusCount: Record<string, number>;
   priorityCount: Record<string, number>;
   tagCount: Record<string, number>;
+  ticketsByDay: Record<string, number>;
 }
 
 const STATUS_COLORS = {
@@ -75,6 +81,10 @@ const PRIORITY_COLORS = {
   urgent: 'bg-red-500',
   default: 'bg-gray-400'
 };
+
+// Primary gradient class for special highlights only
+const PRIMARY_GRADIENT = "bg-gradient-to-r from-orange-400 to-pink-500";
+const PRIMARY_HOVER_GRADIENT = "hover:bg-gradient-to-r hover:from-orange-500 hover:to-pink-600";
 
 // Helper function to get analysis from ticket
 const getAnalysis = (ticket: Ticket): AnalysisData | null => {
@@ -115,8 +125,31 @@ const processTickets = (tickets: Ticket[]): DashboardStats => {
     });
     return acc;
   }, {} as Record<string, number>);
+  
+  // Group tickets by day for the last 7 days
+  const ticketsByDay: Record<string, number> = {};
+  const today = new Date();
+  const sevenDaysAgo = new Date(today);
+  sevenDaysAgo.setDate(today.getDate() - 6);
+  
+  // Initialize all 7 days with 0
+  for (let i = 0; i < 7; i++) {
+    const date = new Date(sevenDaysAgo);
+    date.setDate(sevenDaysAgo.getDate() + i);
+    const dateString = date.toISOString().split('T')[0];
+    ticketsByDay[dateString] = 0;
+  }
+  
+  // Count tickets per day
+  tickets.forEach(ticket => {
+    const date = new Date(ticket.zendesk_created_at || ticket.created_at);
+    if (date >= sevenDaysAgo && date <= today) {
+      const dateString = date.toISOString().split('T')[0];
+      ticketsByDay[dateString] = (ticketsByDay[dateString] || 0) + 1;
+    }
+  });
 
-  return { statusCount, priorityCount, tagCount };
+  return { statusCount, priorityCount, tagCount, ticketsByDay };
 };
 
 // Generate insight cards based on ticket data
@@ -166,6 +199,17 @@ const generateInsights = (tickets: Ticket[]): string[] => {
   }
   
   return insights.slice(0, 4); // Return up to 4 insights
+};
+
+// Icon mapping for insights
+const getInsightIcon = (index: number) => {
+  const icons = [
+    <Lightbulb key="lightbulb" className="h-5 w-5 text-highlight-orange" />,
+    <PieChart key="chart" className="h-5 w-5 text-highlight-pink" />,
+    <TrendingUp key="trending" className="h-5 w-5 text-highlight-orange" />,
+    <BrainCircuit key="brain" className="h-5 w-5 text-highlight-pink" />
+  ];
+  return icons[index % icons.length];
 };
 
 interface DashboardContentProps {
@@ -237,6 +281,13 @@ export function DashboardContent({ initialTickets, isZendeskConnected, firstName
   const topTags = Object.entries(stats.tagCount)
     .sort(([, a], [, b]) => b - a)
     .slice(0, 5);
+    
+  // Calculate max for tag visualization
+  const maxTagCount = topTags.length > 0 ? topTags[0][1] : 0;
+  
+  // Prepare activity chart data
+  const activityData = Object.entries(stats.ticketsByDay).sort(([a], [b]) => a.localeCompare(b));
+  const maxActivity = Math.max(...Object.values(stats.ticketsByDay), 1);
 
   return (
     <div className="w-full space-y-8">
@@ -251,97 +302,130 @@ export function DashboardContent({ initialTickets, isZendeskConnected, firstName
       </div>
 
       {/* Key stats */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 md:gap-6">
-        <Card className="w-full">
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-gray-500">Total Tickets</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{tickets.length}</div>
-          </CardContent>
-        </Card>
-
-        <Card className="w-full">
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-gray-500">Open Tickets</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{stats.statusCount['open'] || 0}</div>
-          </CardContent>
-        </Card>
-
-        <Card className="w-full">
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-gray-500">Analyzed Tickets</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">
-              {tickets.filter(t => {
-                const analysis = getAnalysis(t);
-                return analysis?.aiSummary && analysis.aiSummary.trim().length > 0;
-              }).length}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
+        <Card className="w-full overflow-hidden shadow-sm hover:shadow transition-all duration-300 group border-gray-100 border-l-4 border-l-highlight-orange">
+          <CardContent className="p-6">
+            <div className="flex justify-between items-start">
+              <div className="flex flex-col gap-3">
+                <h3 className="text-sm font-medium text-gray-500">Imported Tickets</h3>
+                <div className="text-3xl font-bold group-hover:translate-x-1 transition-transform duration-300">{tickets.length}</div>
+              </div>
+              <div className="bg-orange-100 p-2.5 rounded-full group-hover:bg-orange-200 transition-colors duration-300">
+                <Check className="h-5 w-5 text-highlight-orange" />
+              </div>
             </div>
           </CardContent>
         </Card>
 
-        <Card className="w-full">
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-gray-500">AI-Generated Tags</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">
-              {Object.keys(stats.tagCount).length}
+        <Card className="w-full overflow-hidden shadow-sm hover:shadow transition-all duration-300 group border-gray-100 border-l-4 border-l-highlight-pink">
+          <CardContent className="p-6">
+            <div className="flex justify-between items-start">
+              <div className="flex flex-col gap-3">
+                <h3 className="text-sm font-medium text-gray-500">Analyzed Tickets</h3>
+                <div className="text-3xl font-bold group-hover:translate-x-1 transition-transform duration-300">
+                  {tickets.filter(t => {
+                    const analysis = getAnalysis(t);
+                    return analysis?.aiSummary && analysis.aiSummary.trim().length > 0;
+                  }).length}
+                </div>
+              </div>
+              <div className="bg-pink-100 p-2.5 rounded-full group-hover:bg-pink-200 transition-colors duration-300">
+                <BrainCircuit className="h-5 w-5 text-highlight-pink" />
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card className="w-full overflow-hidden shadow-sm hover:shadow transition-all duration-300 group border-gray-100 border-l-4 border-l-[#0E0E10]">
+          <CardContent className="p-6">
+            <div className="flex justify-between items-start">
+              <div className="flex flex-col gap-3">
+                <h3 className="text-sm font-medium text-gray-500">AI-Generated Tags</h3>
+                <div className="text-3xl font-bold group-hover:translate-x-1 transition-transform duration-300">
+                  {Object.keys(stats.tagCount).length}
+                </div>
+              </div>
+              <div className="bg-gray-100 p-2.5 rounded-full group-hover:bg-gray-200 transition-colors duration-300">
+                <Tag className="h-5 w-5 text-[#0E0E10]" />
+              </div>
             </div>
           </CardContent>
         </Card>
       </div>
+      
+      {/* Activity chart and insights split */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        {/* Activity chart */}
+        <Card className="w-full shadow-sm hover:shadow-md transition-shadow duration-300 lg:col-span-1">
+          <CardHeader className="pb-2">
+            <div className="flex items-center space-x-2">
+              <TrendingUp className="h-5 w-5 text-highlight-orange" />
+              <CardTitle className="text-lg font-semibold">7-Day Activity</CardTitle>
+            </div>
+          </CardHeader>
+          <CardContent>
+            {activityData.length > 0 ? (
+              <div className="h-44 flex items-end justify-between gap-1">
+                {activityData.map(([date, count], index) => {
+                  const height = (count / maxActivity) * 100;
+                  const formattedDate = new Date(date).toLocaleDateString('en-US', { weekday: 'short' });
+                  return (
+                    <div key={date} className="flex flex-col items-center gap-1 flex-1">
+                      <div 
+                        className="w-full bg-[#0E0E10] rounded-t transition-all duration-300 hover:opacity-90" 
+                        style={{ height: `${Math.max(height, 5)}%` }}
+                      ></div>
+                      <span className="text-xs text-gray-500">{formattedDate}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="flex items-center justify-center h-40">
+                <p className="text-sm text-gray-500">No activity data available</p>
+              </div>
+            )}
+          </CardContent>
+        </Card>
 
-      {/* Latest Insights */}
-      <section className="space-y-4">
-        <div className="flex items-center space-x-2">
-          <Sparkles className="h-5 w-5 text-primary" />
-          <h2 className="text-xl font-semibold">Latest Insights</h2>
+        {/* Recent Insights */}
+        <div className="lg:col-span-2">
+          <RecentInsights />
         </div>
-        
-        {insights.length > 0 ? (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-            {insights.map((insight, index) => (
-              <Card key={index} className="w-full h-full bg-white">
-                <CardContent className="p-4">
-                  <p className="text-sm text-gray-700">{insight}</p>
-                </CardContent>
-              </Card>
-            ))}
-          </div>
-        ) : (
-          <Card className="w-full bg-gray-50">
-            <CardContent className="p-6 text-center">
-              <p className="text-sm text-gray-500">More tickets needed to generate reliable insights</p>
-            </CardContent>
-          </Card>
-        )}
-      </section>
+      </div>
 
       {/* Top 5 Tags */}
       <section className="space-y-4">
         <div className="flex items-center space-x-2">
-          <Tag className="h-5 w-5 text-primary" />
+          <Tag className="h-5 w-5 text-highlight-orange" />
           <h2 className="text-xl font-semibold">Top 5 Tags</h2>
         </div>
         
         {topTags.length > 0 ? (
-          <div className="flex flex-wrap gap-2">
-            {topTags.map(([tag, count]) => (
-              <Badge 
-                key={tag} 
-                className="px-3 py-1 text-sm bg-primary text-white hover:bg-primary/90 rounded-full shadow-sm"
-              >
-                {tag} ({count})
-              </Badge>
-            ))}
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-3">
+            {topTags.map(([tag, count]) => {
+              const percentage = Math.round((count / maxTagCount) * 100);
+              return (
+                <div 
+                  key={tag} 
+                  className="bg-white p-3 rounded-lg shadow-sm hover:shadow-md transition-all duration-300 border border-gray-100 hover:border-highlight-orange"
+                >
+                  <div className="flex justify-between items-center mb-2">
+                    <span className="font-medium text-gray-800">{tag}</span>
+                    <span className="text-sm text-gray-500">{count}</span>
+                  </div>
+                  <div className="w-full bg-gray-100 rounded-full h-2.5">
+                    <div 
+                      className="h-2.5 rounded-full bg-[#0E0E10]" 
+                      style={{ width: `${percentage}%` }}
+                    ></div>
+                  </div>
+                </div>
+              );
+            })}
           </div>
         ) : (
-          <Card className="w-full bg-gray-50">
+          <Card className="w-full bg-gray-50 shadow-sm">
             <CardContent className="p-6 text-center">
               <p className="text-sm text-gray-500">No AI-generated tags available yet</p>
             </CardContent>
@@ -352,11 +436,11 @@ export function DashboardContent({ initialTickets, isZendeskConnected, firstName
       {/* Recent Tickets Table */}
       <section className="space-y-4">
         <div className="flex items-center space-x-2">
-          <Calendar className="h-5 w-5 text-primary" />
+          <Calendar className="h-5 w-5 text-highlight-orange" />
           <h2 className="text-xl font-semibold">Recent Tickets</h2>
         </div>
         
-        <div className="overflow-hidden bg-white shadow rounded-lg">
+        <div className="overflow-hidden bg-white shadow-sm rounded-lg border border-gray-100">
           <div className="min-w-full divide-y divide-gray-200">
             <div className="bg-gray-50">
               <div className="grid grid-cols-12 gap-2 px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
@@ -373,7 +457,10 @@ export function DashboardContent({ initialTickets, isZendeskConnected, firstName
                 tickets.slice(0, 5).map((ticket) => {
                   const analysis = getAnalysis(ticket);
                   return (
-                    <div key={ticket.id} className="grid grid-cols-12 gap-2 px-6 py-4 text-sm">
+                    <div 
+                      key={ticket.id} 
+                      className="grid grid-cols-12 gap-2 px-6 py-4 text-sm group hover:bg-gray-50 transition-colors duration-300"
+                    >
                       <div className="col-span-1 font-medium text-gray-900">
                         {ticket.zendesk_id}
                       </div>
@@ -381,7 +468,7 @@ export function DashboardContent({ initialTickets, isZendeskConnected, firstName
                         <div className="font-medium text-gray-900">
                           {ticket.subject}
                           {analysis?.aiSummary && (
-                            <Badge className="ml-2 bg-primary text-white text-xs">Analyzed</Badge>
+                            <Badge className="ml-2 text-white text-xs" variant="gradient">Analyzed</Badge>
                           )}
                         </div>
                         <div className="text-xs text-gray-500 mt-1">
@@ -394,7 +481,7 @@ export function DashboardContent({ initialTickets, isZendeskConnected, firstName
                         <div className="flex flex-wrap gap-1">
                           {analysis?.aiTags && Array.isArray(analysis.aiTags) && analysis.aiTags.length > 0 
                             ? analysis.aiTags.slice(0, 3).map((tag, i) => (
-                              <Badge key={i} className="text-xs bg-primary text-white">
+                              <Badge key={i} className="text-xs" variant="subtle">
                                 {tag}
                               </Badge>
                             ))
@@ -414,10 +501,13 @@ export function DashboardContent({ initialTickets, isZendeskConnected, firstName
                         <Button 
                           variant="ghost" 
                           size="sm" 
-                          className="p-1 h-8 w-8"
+                          className="p-1 h-8 w-8 relative group"
                           onClick={() => setSelectedTicket(ticket)}
                         >
-                          <Eye className="h-4 w-4" />
+                          <Eye className="h-4 w-4 group-hover:opacity-0 transition-opacity" />
+                          <span className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 text-xs font-medium text-highlight-orange transition-opacity">
+                            View details
+                          </span>
                         </Button>
                       </div>
                     </div>

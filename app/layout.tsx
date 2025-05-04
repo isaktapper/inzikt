@@ -6,6 +6,7 @@ import { ThemeProvider } from "@/components/theme-provider"
 import { Toaster } from "@/components/ui/toaster"
 import { AnalysisProgressProvider } from "@/contexts/AnalysisProgressContext"
 import { ImportProgressProvider } from "@/contexts/ImportProgressContext"
+import AuthBypass from '@/components/ui/AuthBypass'
 
 const inter = Inter({ subsets: ["latin"] })
 
@@ -28,6 +29,7 @@ export default function RootLayout({
             <ImportProgressProvider>
               {children}
               <Toaster />
+              {process.env.NODE_ENV === 'development' && <AuthBypass />}
             </ImportProgressProvider>
           </AnalysisProgressProvider>
         </ThemeProvider>

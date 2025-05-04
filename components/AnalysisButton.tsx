@@ -17,48 +17,62 @@ export function AnalysisButton({ className }: AnalysisButtonProps) {
   const supabase = createClientComponentClient()
   
   // Start a new analysis
-  const handleStartAnalysis = async () => {
+  const handleAnalyze = async () => {
     try {
       setIsStarting(true)
       
-      // Get current user
       const { data: { user } } = await supabase.auth.getUser()
       
       if (!user) {
         toast({
           title: 'Authentication error',
-          description: 'Please sign in to analyze tickets',
-          variant: 'destructive',
+          description: 'You must be logged in to analyze tickets',
+          variant: 'destructive'
         })
         return
       }
       
-      // Call API to start analysis
-      const response = await fetch('/api/analyze', {
+      // Start the analysis process
+      const response = await fetch('/api/analyze-tickets', {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json',
+          'Content-Type': 'application/json'
         },
-        body: JSON.stringify({ userId: user.id }),
+        body: JSON.stringify({ userId: user.id })
       })
       
       if (!response.ok) {
         throw new Error(`Error ${response.status}: ${response.statusText}`)
       }
       
-      // Update state in context
-      startAnalysis(user.id)
+      const data = await response.json()
       
+      if (data.error) {
+        throw new Error(data.error)
+      }
+      
+      if (data.jobId) {
+        // Now we pass the job ID to the context
+        startAnalysis(user.id, data.jobId)
+        
+        toast({
+          title: 'Analysis started',
+          description: 'Your tickets are being analyzed and tagged.',
+          variant: 'default'
+        })
+      } else {
+        toast({
+          title: 'Nothing to analyze',
+          description: data.message || 'No tickets found that need analysis',
+          variant: 'default'
+        })
+      }
+    } catch (error: any) {
+      console.error('Analysis error:', error)
       toast({
-        title: 'Analysis started',
-        description: 'Your tickets are being analyzed in the background. You can view progress in the Jobs menu.',
-      })
-    } catch (error) {
-      console.error('Error starting analysis:', error)
-      toast({
-        title: 'Failed to start analysis',
-        description: error instanceof Error ? error.message : 'An unknown error occurred',
-        variant: 'destructive',
+        title: 'Analysis error',
+        description: error.message || 'Failed to start ticket analysis',
+        variant: 'destructive'
       })
     } finally {
       setIsStarting(false)
@@ -69,7 +83,7 @@ export function AnalysisButton({ className }: AnalysisButtonProps) {
     <Button
       variant="default"
       className={className}
-      onClick={handleStartAnalysis}
+      onClick={handleAnalyze}
       disabled={isAnalyzing || isStarting}
     >
       <Sparkles className="h-4 w-4 mr-2" />

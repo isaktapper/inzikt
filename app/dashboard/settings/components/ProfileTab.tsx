@@ -8,7 +8,19 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { User as SupabaseUser } from '@supabase/supabase-js'
 import { Alert, AlertDescription } from '@/components/ui/alert'
-import { AlertCircle, Check, User } from 'lucide-react'
+import { AlertCircle, Check, Trash2, User } from 'lucide-react'
+import { 
+  AlertDialog, 
+  AlertDialogAction, 
+  AlertDialogCancel, 
+  AlertDialogContent, 
+  AlertDialogDescription, 
+  AlertDialogFooter, 
+  AlertDialogHeader, 
+  AlertDialogTitle, 
+  AlertDialogTrigger 
+} from "@/components/ui/alert-dialog"
+import { useRouter } from 'next/navigation'
 
 interface UserProfile {
   email: string
@@ -17,11 +29,14 @@ interface UserProfile {
 }
 
 export function ProfileTab() {
+  const router = useRouter()
   const [supabase] = useState(() => createClientSupabaseClient())
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null)
   const [isEditing, setIsEditing] = useState(false)
   const [formData, setFormData] = useState<UserProfile | null>(null)
   const [loading, setLoading] = useState(true)
+  const [deletionLoading, setDeletionLoading] = useState(false)
+  const [showDeleteConfirmation, setShowDeleteConfirmation] = useState(false)
 
   useEffect(() => {
     const fetchUserProfile = async () => {
@@ -76,6 +91,47 @@ export function ProfileTab() {
       console.error('Error updating profile:', error)
     } finally {
       setLoading(false)
+    }
+  }
+
+  const handleDeleteAccount = async () => {
+    try {
+      setDeletionLoading(true)
+      
+      // First, ensure the user is authenticated
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user) {
+        throw new Error('User not authenticated')
+      }
+      
+      // Delete user data from the database using a Supabase function
+      // This should cascade delete all associated user data
+      const { error: functionError } = await supabase.functions.invoke('delete-account', {
+        body: { userId: user.id }
+      })
+      
+      if (functionError) {
+        throw functionError
+      }
+      
+      // Finally delete the auth user
+      const { error: authError } = await supabase.auth.admin.deleteUser(user.id)
+      
+      if (authError) {
+        throw authError
+      }
+      
+      // Sign out the user locally
+      await supabase.auth.signOut()
+      
+      // Redirect to login page
+      router.push('/login?deleted=true')
+    } catch (error) {
+      console.error('Error deleting account:', error)
+      alert('Failed to delete account. Please try again later or contact support.')
+    } finally {
+      setDeletionLoading(false)
+      setShowDeleteConfirmation(false)
     }
   }
 
@@ -178,6 +234,67 @@ export function ProfileTab() {
               </div>
             </div>
           )}
+        </CardContent>
+      </Card>
+
+      {/* Danger Zone Section */}
+      <Card className="border-red-200">
+        <CardHeader>
+          <CardTitle className="text-red-600">Danger Zone</CardTitle>
+          <CardDescription>
+            Actions in this section can lead to permanent data loss.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="border border-red-200 rounded-md p-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <h3 className="font-medium">Delete Account</h3>
+                <p className="text-sm text-muted-foreground">
+                  Permanently delete your account and all associated data. This action cannot be undone.
+                </p>
+              </div>
+              <AlertDialog open={showDeleteConfirmation} onOpenChange={setShowDeleteConfirmation}>
+                <AlertDialogTrigger asChild>
+                  <Button variant="destructive" size="sm">
+                    <Trash2 className="h-4 w-4 mr-2" />
+                    Delete Account
+                  </Button>
+                </AlertDialogTrigger>
+                <AlertDialogContent>
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>Are you absolutely sure?</AlertDialogTitle>
+                    <AlertDialogDescription>
+                      This action will permanently delete your account and all associated data. 
+                      This includes your profile, tickets, analyses, and billing information.
+                      <br /><br />
+                      <span className="font-medium">This action cannot be undone.</span>
+                    </AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter>
+                    <AlertDialogCancel>Cancel</AlertDialogCancel>
+                    <AlertDialogAction
+                      className="bg-red-600 hover:bg-red-700"
+                      onClick={(e) => {
+                        e.preventDefault()
+                        handleDeleteAccount()
+                      }}
+                      disabled={deletionLoading}
+                    >
+                      {deletionLoading ? (
+                        <>
+                          <div className="animate-spin rounded-full h-4 w-4 mr-2 border-b-2 border-white"></div>
+                          Deleting...
+                        </>
+                      ) : (
+                        'Yes, delete my account'
+                      )}
+                    </AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
+            </div>
+          </div>
         </CardContent>
       </Card>
     </div>

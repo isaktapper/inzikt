@@ -13,6 +13,7 @@ import { createClientSupabaseClient } from "@/utils/supabase/client"
 function LoginLogic() {
   const router = useRouter()
   const searchParams = useSearchParams()
+  const redirectTo = searchParams.get('redirectedFrom') || '/dashboard'
   const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
   const [error, setError] = useState<string | null>(null)
@@ -28,12 +29,12 @@ function LoginLogic() {
     const checkSession = async () => {
       const { data } = await supabase.auth.getSession()
       if (data.session) {
-        router.push("/dashboard")
+        router.push(redirectTo)
       }
     }
 
     checkSession()
-  }, [router, searchParams, supabase])
+  }, [router, searchParams, supabase, redirectTo])
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -47,102 +48,116 @@ function LoginLogic() {
     }
 
     try {
-      const { error } = await supabase.auth.signInWithPassword({ email, password })
-      if (error) throw error
-
-      const { data: { user } } = await supabase.auth.getUser()
-
-      if (user) {
-        router.push("/dashboard")
-      } else {
-        router.push("/onboarding/connect-zendesk")
+      // Always use direct window navigation after auth - the most reliable approach
+      const { data, error } = await supabase.auth.signInWithPassword({ 
+        email, 
+        password
+      })
+      
+      if (error) {
+        throw error
       }
+
+      if (!data || !data.user) {
+        throw new Error("Authentication failed")
+      }
+      
+      // Store successful login in localStorage as fallback
+      try {
+        localStorage.setItem('auth_success', 'true')
+      } catch (e) {
+        // Ignore storage errors
+      }
+      
+      // MOST RELIABLE: Using direct window navigation instead of router
+      // This ensures proper authentication propagation and avoids router issues
+      console.log("Login successful, redirecting to:", redirectTo)
+      window.location.href = redirectTo
+      
     } catch (error: any) {
-      console.error("Login error:", error)
-      if (error.message.includes("Invalid login")) {
+      if (error.message && error.message.includes("Invalid login")) {
         setError("Invalid email or password")
       } else {
         setError(error.message || "Failed to sign in")
       }
-    } finally {
       setIsLoading(false)
     }
   }
 
   return (
-    <>
+    <form onSubmit={handleLogin} className="space-y-6">
       {error && (
-        <Alert variant="destructive" className="mb-4">
+        <Alert variant="destructive" className="bg-red-50 border-red-200 text-red-800">
           <AlertDescription>{error}</AlertDescription>
         </Alert>
       )}
 
-      <form onSubmit={handleLogin} className="space-y-4">
-        <div className="space-y-2">
-          <Label htmlFor="email">Email</Label>
-          <Input 
-            id="email" 
-            type="email" 
-            placeholder="you@company.com"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            required
-          />
-        </div>
+      <div className="space-y-2">
+        <Label htmlFor="email">Email Address</Label>
+        <Input
+          id="email"
+          type="email"
+          placeholder="you@company.com"
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          className="border-gray-300 focus:border-orange-400 focus:ring focus:ring-orange-200 focus:ring-opacity-50"
+        />
+      </div>
 
-        <div className="space-y-2">
-          <div className="flex items-center justify-between">
-            <Label htmlFor="password">Password</Label>
-            <Link href="/forgot-password" className="text-sm text-black hover:underline">
-              Forgot password?
-            </Link>
-          </div>
-          <Input 
-            id="password" 
-            type="password" 
-            placeholder="••••••••"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            required
-          />
+      <div className="space-y-2">
+        <div className="flex items-center justify-between">
+          <Label htmlFor="password">Password</Label>
+          <Link href="/forgot-password" className="text-sm text-orange-500 hover:text-pink-500 transition-colors duration-200">
+            Forgot password?
+          </Link>
         </div>
+        <Input
+          id="password"
+          type="password"
+          placeholder="••••••••"
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          className="border-gray-300 focus:border-orange-400 focus:ring focus:ring-orange-200 focus:ring-opacity-50"
+        />
+      </div>
 
-        <div className="flex items-center space-x-2">
-          <Checkbox id="remember" />
-          <Label htmlFor="remember" className="text-sm font-normal">
-            Remember me for 30 days
-          </Label>
-        </div>
-
-        <Button 
-          type="submit" 
-          className="w-full bg-[#d8f950] text-black hover:bg-[#c2e340]"
-          disabled={isLoading}
+      <div className="flex items-center space-x-2">
+        <Checkbox id="remember" />
+        <label
+          htmlFor="remember"
+          className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 text-[#0E0E10]"
         >
-          {isLoading ? "Signing in..." : "Sign in"}
-        </Button>
-      </form>
-    </>
+          Remember me
+        </label>
+      </div>
+
+      <Button
+        type="submit"
+        className="w-full bg-gradient-to-r from-orange-400 to-pink-500 text-white hover:shadow-md hover:scale-105 transition-all duration-200"
+        disabled={isLoading}
+      >
+        {isLoading ? "Signing in..." : "Sign in"}
+      </Button>
+    </form>
   )
 }
 
 export default function LoginPage() {
   return (
-    <div className="min-h-screen bg-gray-50 flex flex-col">
+    <div className="min-h-screen bg-orange-50/30 flex flex-col">
       <header className="border-b bg-white">
         <div className="container flex h-16 items-center">
           <Link href="/" className="flex items-center gap-2">
-            <img src="/inzikt_logo.svg" alt="Inzikt Logo" className="h-10 w-10" style={{ filter: 'brightness(0) saturate(100%) invert(41%) sepia(94%) saturate(749%) hue-rotate(202deg) brightness(99%) contrast(101%)' }} />
-            <span className="font-bold text-xl text-[#6366F1]">Inzikt</span>
+            <img src="/inzikt_logo.svg" alt="Inzikt Logo" className="h-8 w-auto" />
           </Link>
         </div>
       </header>
 
       <main className="flex-1 flex items-center justify-center p-4">
         <div className="w-full max-w-md">
-          <div className="bg-white rounded-xl border shadow-sm p-6 md:p-8">
+          <div className="bg-white rounded-xl border shadow-sm p-6 md:p-8 hover:shadow-md transition-all duration-300">
             <div className="text-center mb-6">
-              <h1 className="text-2xl font-bold mb-2">Welcome back</h1>
+              <h1 className="text-2xl font-bold mb-2 text-[#0E0E10]">Welcome back</h1>
               <p className="text-gray-600">Sign in to your Inzikt account</p>
             </div>
 
@@ -153,7 +168,7 @@ export default function LoginPage() {
             <div className="mt-6 pt-6 border-t text-center">
               <p className="text-sm text-gray-600">
                 Don't have an account?{" "}
-                <Link href="/register" className="text-black font-medium hover:underline">
+                <Link href="/register" className="text-orange-500 font-medium hover:text-pink-500 transition-colors duration-200 hover:underline">
                   Sign up
                 </Link>
               </p>

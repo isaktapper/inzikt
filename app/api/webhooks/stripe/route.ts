@@ -98,14 +98,18 @@ export async function POST(req: Request) {
 // Map Stripe price IDs to plan details
 function mapPriceIdToPlan(priceId: string) {
   switch (priceId) {
-    case "price_1RDuOHGgRGIBAOxtdXc6lEDn":
-      return { name: "professional", interval: "monthly", limit: 5000 };
-    case "price_1RDuOrGgRGIBAOxtuvq0vp5i":
-      return { name: "professional", interval: "yearly", limit: 5000 };
-    case "price_1RDuNUGgRGIBAOxtOO3TnDNJ":
-      return { name: "growth", interval: "monthly", limit: 1000 };
-    case "price_1RDuNUGgRGIBAOxtgDtKGSD3":
-      return { name: "growth", interval: "yearly", limit: 1000 };
+    case process.env.STRIPE_PRICE_PRO_MONTHLY:
+      return { name: "professional", interval: "monthly", limit: 10000 };
+    case process.env.STRIPE_PRICE_PRO_YEARLY:
+      return { name: "professional", interval: "yearly", limit: 10000 };
+    case process.env.STRIPE_PRICE_GROWTH_MONTHLY:
+      return { name: "growth", interval: "monthly", limit: 2000 };
+    case process.env.STRIPE_PRICE_GROWTH_YEARLY:
+      return { name: "growth", interval: "yearly", limit: 2000 };
+    case process.env.STRIPE_PRICE_STARTER_MONTHLY:
+      return { name: "starter", interval: "monthly", limit: 500 };
+    case process.env.STRIPE_PRICE_STARTER_YEARLY:
+      return { name: "starter", interval: "yearly", limit: 500 };
     default:
       return { name: "unknown", interval: "unknown", limit: 0 };
   }

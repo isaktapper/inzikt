@@ -8,6 +8,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { IntegrationsTab } from './components/IntegrationsTab'
 import { ProfileTab } from './components/ProfileTab'
 import { TagsTab } from './components/TagsTab'
+import { BillingTab } from './components/BillingTab'
 import { Button } from '@/components/ui/button'
 import { ArrowLeft, User, Link2, Download, Brain, CreditCard, Zap, HomeIcon, Tag } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -50,7 +51,9 @@ function SettingsLogic() {
     ? 'integrations' 
     : tabParam === 'tags'
       ? 'tags'
-      : 'profile'
+      : tabParam === 'billing'
+        ? 'billing'
+        : 'profile'
 
   const [supabase] = useState(() => createClientSupabaseClient())
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null)
@@ -176,11 +179,15 @@ function SettingsLogic() {
     <Tabs defaultValue={defaultTab} className="space-y-6" onValueChange={handleTabChange}>
       <TabsList className="bg-background border">
         <TabsTrigger value="profile">Profile</TabsTrigger>
+        <TabsTrigger value="billing">Billing & Plan</TabsTrigger>
         <TabsTrigger value="integrations">Integrations</TabsTrigger>
         <TabsTrigger value="tags">Tags</TabsTrigger>
       </TabsList>
       <TabsContent value="profile">
         <ProfileTab />
+      </TabsContent>
+      <TabsContent value="billing">
+        <BillingTab />
       </TabsContent>
       <TabsContent value="integrations">
         <IntegrationsTab />
